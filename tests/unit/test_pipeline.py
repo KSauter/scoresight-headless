@@ -368,7 +368,11 @@ def test_clock_preserves_tenths_and_normalizes_minutes(text: str, expected: str)
     assert result.value == expected
 
 
-@pytest.mark.parametrize("text", ["60.0", "99.9", "123.4", "59.", ".9", "59:9", "-1.0"])
+# "59:9" moved out of this list: a separator followed by a single digit is now
+# read as tenths, because no clock shows "MM:S" and the engine reports the dot
+# of "SS.t" as a colon often enough to lose the whole final minute otherwise.
+# Values that are out of range for tenths, such as "60.0", stay rejected.
+@pytest.mark.parametrize("text", ["60.0", "99.9", "123.4", "59.", ".9", "-1.0"])
 def test_clock_rejects_invalid_tenths_without_replacing_accepted_value(text: str) -> None:
     region = RegionConfig(
         name="Clock",
