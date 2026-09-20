@@ -41,3 +41,12 @@
 .mapping-row input { flex: 1; min-width: 0; }
 #outputs-raw { margin-top: 0.5rem; }
 #outputs-raw summary { cursor: pointer; font-size: 0.82rem; opacity: 0.8; }
+
+/* Grid items default to min-width:auto, so a panel grows to fit its widest
+   child instead of scrolling it. The results table declares min-width:620px,
+   which pushed the whole control column past the viewport and gave the page a
+   horizontal scrollbar. Allowing the tracks to shrink lets the overflow-x on
+   .results-table-wrap do its job. */
+.workspace > *,
+.controls > *,
+.results-table-wrap { min-width: 0; }
