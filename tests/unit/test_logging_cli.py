@@ -4,8 +4,10 @@ import json
 import logging
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from scoresight import cli
+from scoresight.core.config import ConfigStore
 from scoresight.core.deployment import DeploymentSettings
 from scoresight.core.logging import (
     JsonFormatter,
@@ -50,7 +52,10 @@ def test_cli_uses_single_worker_deployment_settings(monkeypatch, tmp_path) -> No
     deployment = DeploymentSettings(trusted_proxies="10.0.0.0/8", access_log=False)
     monkeypatch.setattr(cli.DeploymentSettings, "from_env", lambda: deployment)
     monkeypatch.setattr(cli, "configure_logging", lambda *args, **kwargs: None)
-    monkeypatch.setattr(cli, "create_app", lambda *args, **kwargs: "app")
+    # main() reads the store off the application to report the access details,
+    # so the stand-in needs that attribute.
+    app = SimpleNamespace(state=SimpleNamespace(config_store=ConfigStore(tmp_path / "config.json")))
+    monkeypatch.setattr(cli, "create_app", lambda *args, **kwargs: app)
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
     monkeypatch.setattr(
         sys,
