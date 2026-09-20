@@ -65,7 +65,7 @@ jobs:
             | Out-File -FilePath scoresight-service.iss -Encoding ASCII
 
       - name: Installer kompilieren
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
         with:
           path: scoresight-service.iss
           options: /O+
