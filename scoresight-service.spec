@@ -38,7 +38,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=["pyinstaller_runtime_hook.py"],
+    runtime_hooks=[],
     excludes=["PySide6"],
     noarchive=False,
 )

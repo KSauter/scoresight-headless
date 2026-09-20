@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -182,10 +183,26 @@ class RuntimeController:
         raise ValueError(f"unsupported source kind: {source.kind}")
 
     @staticmethod
-    def _build_pipeline(config: ServiceConfig) -> RecognitionPipeline:
+    def tessdata_path() -> Path:
+        """Locate the traineddata models.
+
+        Three layouts have to be told apart. An explicit SCORESIGHT_TESSDATA
+        wins, so a deployment can keep its models outside the installation.
+        A PyInstaller build unpacks its data files below sys._MEIPASS, which is
+        the only reliable anchor there. Everything else is a source checkout,
+        where the models sit at the repository root.
+        """
         env_path = os.getenv("SCORESIGHT_TESSDATA")
-        repository_path = Path(__file__).resolve().parents[3] / "tesseract" / "tessdata"
-        tessdata_path = Path(env_path) if env_path else repository_path
+        if env_path:
+            return Path(env_path)
+        bundle_root = getattr(sys, "_MEIPASS", None)
+        if bundle_root is not None:
+            return Path(bundle_root) / "tesseract" / "tessdata"
+        return Path(__file__).resolve().parents[3] / "tesseract" / "tessdata"
+
+    @staticmethod
+    def _build_pipeline(config: ServiceConfig) -> RecognitionPipeline:
+        tessdata_path = RuntimeController.tessdata_path()
         field_whitelists = {
             "number": "0123456789",
             "time": "0123456789:.",

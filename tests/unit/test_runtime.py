@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import UTC, datetime
 
 import numpy as np
@@ -8,7 +9,12 @@ import pytest
 
 from scoresight.capture.base import FramePacket
 from scoresight.core.config import ConfigStore
-from scoresight.core.models import NormalizedRect, RegionConfig, ServiceConfig, SourceConfig
+from scoresight.core.models import (
+    NormalizedRect,
+    RegionConfig,
+    ServiceConfig,
+    SourceConfig,
+)
 from scoresight.core.runtime import RuntimeController
 from scoresight.core.service import ScoreSightService
 
@@ -98,11 +104,15 @@ def test_network_source_reads_uri_from_secret_file(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_reconnects_after_capture_open_failure(tmp_path, monkeypatch) -> None:
+async def test_runtime_reconnects_after_capture_open_failure(
+    tmp_path, monkeypatch
+) -> None:
     store = ConfigStore(tmp_path / "config.json")
     current = store.load()
     store.replace(
-        current.model_copy(update={"source": SourceConfig(kind="mock", reconnect_seconds=0.1)}),
+        current.model_copy(
+            update={"source": SourceConfig(kind="mock", reconnect_seconds=0.1)}
+        ),
         current.revision,
     )
     service = ScoreSightService(store)
@@ -126,3 +136,27 @@ async def test_runtime_reconnects_after_capture_open_failure(tmp_path, monkeypat
             await controller.stop()
     assert service.metrics.capture_failures._value.get() == 1
     assert service.metrics.capture_reconnects._value.get() == 1
+
+
+def test_tessdata_path_prefers_explicit_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("SCORESIGHT_TESSDATA", str(tmp_path))
+    monkeypatch.setattr(sys, "_MEIPASS", "/frozen", raising=False)
+    assert RuntimeController.tessdata_path() == tmp_path
+
+
+def test_tessdata_path_follows_the_frozen_bundle(monkeypatch, tmp_path):
+    # PyInstaller collects data files below sys._MEIPASS. Resolving them
+    # relative to the module instead lands beside the executable, where
+    # nothing was ever written.
+    monkeypatch.delenv("SCORESIGHT_TESSDATA", raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert RuntimeController.tessdata_path() == tmp_path / "tesseract" / "tessdata"
+
+
+def test_tessdata_path_uses_the_repository_layout_when_not_frozen(monkeypatch):
+    monkeypatch.delenv("SCORESIGHT_TESSDATA", raising=False)
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    resolved = RuntimeController.tessdata_path()
+    assert resolved.parts[-2:] == ("tesseract", "tessdata")
+    # The checkout ships the models, so this one has to exist.
+    assert resolved.is_dir()
