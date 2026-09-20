@@ -32,25 +32,36 @@ def test_api_auth_config_revision_and_profiles(tmp_path) -> None:
         saved = client.put("/api/v1/config", headers=headers, json=current)
         assert saved.status_code == 200
         assert saved.json()["revision"] == 1
-        assert client.put("/api/v1/config", headers=headers, json=current).status_code == 409
+        assert (
+            client.put("/api/v1/config", headers=headers, json=current).status_code
+            == 409
+        )
 
         assert client.put("/api/v1/profiles/game", headers=headers).status_code == 200
         assert client.get("/api/v1/profiles", headers=headers).json() == ["game"]
         assert (
-            client.get("/api/v1/profiles/game", headers=headers).json()["source"]["mode"]
+            client.get("/api/v1/profiles/game", headers=headers).json()["source"][
+                "mode"
+            ]
             == "1080p25"
         )
 
         changed = saved.json()
         changed["source"]["mode"] = "1080p30"
-        assert client.put("/api/v1/config", headers=headers, json=changed).status_code == 200
+        assert (
+            client.put("/api/v1/config", headers=headers, json=changed).status_code
+            == 200
+        )
         activated = client.post("/api/v1/profiles/game/activate", headers=headers)
         assert activated.status_code == 200
         assert activated.json()["source"]["mode"] == "1080p25"
 
         invalid = activated.json()
         invalid["outputs"] = [{"kind": "webhook", "settings": {}}]
-        assert client.put("/api/v1/config", headers=headers, json=invalid).status_code == 422
+        assert (
+            client.put("/api/v1/config", headers=headers, json=invalid).status_code
+            == 422
+        )
 
 
 def test_login_cookie_csrf_and_read_token(tmp_path) -> None:
@@ -63,8 +74,14 @@ def test_login_cookie_csrf_and_read_token(tmp_path) -> None:
         assert created.status_code == 200
         read_token = created.json()["token"]
         client.cookies.clear()
-        assert client.get("/api/v1/health", params={"token": read_token}).status_code == 200
-        assert client.get("/api/v1/config", params={"token": read_token}).status_code == 401
+        assert (
+            client.get("/api/v1/health", params={"token": read_token}).status_code
+            == 200
+        )
+        assert (
+            client.get("/api/v1/config", params={"token": read_token}).status_code
+            == 401
+        )
 
 
 def test_event_websocket_starts_with_latest_snapshot(tmp_path) -> None:
@@ -74,7 +91,9 @@ def test_event_websocket_starts_with_latest_snapshot(tmp_path) -> None:
         sequence=7,
         captured_at=datetime.now(UTC),
         latency_ms=4,
-        fields=[ResultField(id="clock", name="Clock", value="1:23", state=ResultState.OK)],
+        fields=[
+            ResultField(id="clock", name="Clock", value="1:23", state=ResultState.OK)
+        ],
     )
     with (
         TestClient(app) as client,
@@ -137,7 +156,7 @@ def test_dashboard_includes_last_accepted_frame_preview(tmp_path) -> None:
     assert "captureAcceptedPreview" in script.text
     assert "Last accepted frame for" in script.text
     assert "updatePreviewGeometry" in script.text
-    assert "live fan-site OCR WebSocket" in dashboard.text
+    assert "live fan-site WebSocket" in dashboard.text
     assert "refreshOutputStatus" in script.text
 
 
@@ -183,12 +202,17 @@ def test_cloudflare_mode_authenticates_http_csrf_and_websocket(tmp_path) -> None
     with TestClient(app) as client:
         assert client.get("/login", headers=access).status_code == 404
         assert client.get("/api/v1/config").status_code == 401
-        assert client.get("/api/v1/health", params={"token": "ignored"}).status_code == 401
+        assert (
+            client.get("/api/v1/health", params={"token": "ignored"}).status_code == 401
+        )
         dashboard = client.get("/", headers=access)
         assert dashboard.status_code == 200
         csrf = client.cookies.get("scoresight_csrf")
         current = client.get("/api/v1/config", headers=access).json()
-        assert client.put("/api/v1/config", headers=access, json=current).status_code == 403
+        assert (
+            client.put("/api/v1/config", headers=access, json=current).status_code
+            == 403
+        )
         saved = client.put(
             "/api/v1/config",
             headers={**access, "X-CSRF-Token": csrf},
@@ -239,5 +263,43 @@ def test_output_secrets_are_redacted_and_restored_on_save(tmp_path) -> None:
         safe = client.get("/api/v1/config", headers=headers).json()
         assert safe["outputs"][0]["settings"]["token"] == "__redacted__"
         safe["source"]["mode"] = "720p60"
-        assert client.put("/api/v1/config", headers=headers, json=safe).status_code == 200
+        assert (
+            client.put("/api/v1/config", headers=headers, json=safe).status_code == 200
+        )
     assert store.load().outputs[0].settings["token"] == "top-secret"
+
+
+def test_auth_mode_none_opens_every_entry_point(tmp_path) -> None:
+    """Without authentication the API answers unauthenticated callers.
+
+    Covers all four gates, because missing one of them would leave the
+    deployment half-open in a way that only shows up in production.
+    """
+    config_path = tmp_path / "config.json"
+    app = create_app(
+        config_path,
+        tmp_path / "profiles",
+        start_runtime=False,
+        deployment=DeploymentSettings(auth_mode="none"),
+    )
+    with TestClient(app) as client:
+        # require_admin
+        current = client.get("/api/v1/config")
+        assert current.status_code == 200
+        # require_admin_csrf - no cookie, no CSRF header
+        saved = client.put("/api/v1/config", json=current.json())
+        assert saved.status_code == 200
+        # require_read
+        assert client.get("/api/v1/results").status_code == 200
+        # websocket_allowed
+        with client.websocket_connect("/api/v1/events") as socket:
+            assert socket is not None
+        # The local login form has no purpose without tokens.
+        assert client.get("/login").status_code == 404
+
+
+def test_token_mode_still_rejects_unauthenticated_callers(tmp_path) -> None:
+    app, _token = make_client(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/api/v1/config").status_code == 401
+        assert client.get("/api/v1/results").status_code == 401

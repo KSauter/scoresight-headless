@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from scoresight.core.deployment import DeploymentSettings
-from scoresight.core.secrets import REDACTED, read_secret_file, redact_mapping, restore_redacted
+from scoresight.core.secrets import (
+    REDACTED,
+    read_secret_file,
+    redact_mapping,
+    restore_redacted,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -17,7 +22,11 @@ def test_deployment_settings_derive_paths_and_origin(tmp_path) -> None:
     )
     assert settings.config_path(None) == tmp_path / "config-v1.json"
     assert settings.profile_path(None) == tmp_path / "profiles"
-    assert settings.effective_allowed_hosts == ("scoresight.example.com", "127.0.0.1", "localhost")
+    assert settings.effective_allowed_hosts == (
+        "scoresight.example.com",
+        "127.0.0.1",
+        "localhost",
+    )
     assert settings.effective_allowed_origins == ("https://scoresight.example.com",)
     assert settings.secure_cookies
 
@@ -31,7 +40,10 @@ def test_secret_file_and_redacted_round_trip(tmp_path) -> None:
     secret_file = tmp_path / "token"
     secret_file.write_text("  fan-secret\n", encoding="utf-8")
     assert read_secret_file(secret_file) == "fan-secret"
-    current = {"id": "one", "settings": {"token": "fan-secret", "endpoint": "wss://fan"}}
+    current = {
+        "id": "one",
+        "settings": {"token": "fan-secret", "endpoint": "wss://fan"},
+    }
     safe = redact_mapping(current)
     assert safe["settings"]["token"] == REDACTED
     assert restore_redacted(safe, current) == current
@@ -53,3 +65,14 @@ def test_production_mediamtx_is_portainer_self_contained() -> None:
     assert "    volumes:" not in mediamtx_service
     assert "MTX_RTSPTRANSPORTS: tcp" in mediamtx_service
     assert "MTX_PATHS_SCOREBOARD_SOURCE: publisher" in mediamtx_service
+
+
+def test_auth_mode_none_is_accepted(monkeypatch):
+    monkeypatch.setenv("SCORESIGHT_AUTH_MODE", "none")
+    assert DeploymentSettings.from_env().auth_mode == "none"
+
+
+def test_unknown_auth_mode_is_rejected(monkeypatch):
+    monkeypatch.setenv("SCORESIGHT_AUTH_MODE", "trustme")
+    with pytest.raises(ValueError, match="token, none or cloudflare_access"):
+        DeploymentSettings.from_env()

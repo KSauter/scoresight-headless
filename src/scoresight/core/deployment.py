@@ -19,7 +19,7 @@ def _bool(value: str | None, *, default: bool = False) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class DeploymentSettings:
-    auth_mode: Literal["token", "cloudflare_access"] = "token"
+    auth_mode: Literal["token", "none", "cloudflare_access"] = "token"
     data_dir: Path | None = None
     public_url: str | None = None
     allowed_hosts: tuple[str, ...] = ()
@@ -34,8 +34,10 @@ class DeploymentSettings:
     @classmethod
     def from_env(cls) -> DeploymentSettings:
         mode = os.getenv("SCORESIGHT_AUTH_MODE", "token").strip().lower()
-        if mode not in {"token", "cloudflare_access"}:
-            raise ValueError("SCORESIGHT_AUTH_MODE must be token or cloudflare_access")
+        if mode not in {"token", "none", "cloudflare_access"}:
+            raise ValueError(
+                "SCORESIGHT_AUTH_MODE must be token, none or cloudflare_access"
+            )
         data_dir_value = os.getenv("SCORESIGHT_DATA_DIR")
         public_url = os.getenv("SCORESIGHT_PUBLIC_URL") or None
         settings = cls(

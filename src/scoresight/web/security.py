@@ -59,6 +59,10 @@ class SecurityDependencies:
         return AuthIdentity(subject=subject, email=email, claims=claims)
 
     async def require_admin(self, request: Request) -> AuthIdentity:
+        if self.deployment.auth_mode == "none":
+            identity = AuthIdentity(subject="anonymous")
+            request.state.identity = identity
+            return identity
         if self.deployment.auth_mode == "cloudflare_access":
             identity = await self._cloudflare_identity(
                 request.headers.get("Cf-Access-Jwt-Assertion")
@@ -79,6 +83,10 @@ class SecurityDependencies:
 
     async def require_admin_csrf(self, request: Request) -> AuthIdentity:
         identity = await self.require_admin(request)
+        if self.deployment.auth_mode == "none":
+            # CSRF protects a session another site could ride on. Without
+            # authentication there is no session and nothing to escalate.
+            return identity
         if self.deployment.auth_mode == "token" and bearer_token(
             request.headers.get("Authorization")
         ):
@@ -92,6 +100,8 @@ class SecurityDependencies:
         return identity
 
     async def require_read(self, request: Request) -> AuthIdentity:
+        if self.deployment.auth_mode == "none":
+            return await self.require_admin(request)
         if self.deployment.auth_mode == "cloudflare_access":
             return await self.require_admin(request)
         security = self.get_security()
@@ -115,6 +125,8 @@ class SecurityDependencies:
         origin = websocket.headers.get("origin")
         if allowed_origins and origin not in allowed_origins:
             return False
+        if self.deployment.auth_mode == "none":
+            return True
         if self.deployment.auth_mode == "cloudflare_access":
             try:
                 await self._cloudflare_identity(
