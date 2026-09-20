@@ -186,12 +186,12 @@ class NDICapture:
         expected = stride * height
         if buffer.size < expected:
             return None
-        image = buffer[:expected].reshape(height, stride // 4, 4)[:, :width, :]
+        padded = buffer[:expected].reshape(height, stride // 4, 4)[:, :width, :]
 
         # Downstream expects three channels: preprocess() tests for ndim == 3
         # and then calls COLOR_BGR2GRAY, which fails on four channels.
         # np.ascontiguousarray because the stride slice above leaves a view.
-        image = cv2.cvtColor(np.ascontiguousarray(image), cv2.COLOR_BGRA2BGR)
+        image = cv2.cvtColor(np.ascontiguousarray(padded), cv2.COLOR_BGRA2BGR)
 
         self._sequence += 1
         return FramePacket(

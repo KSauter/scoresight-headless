@@ -58,4 +58,4 @@ jobs:
         with:
           node-version: "22"
       - name: Web-Tests
-        run: node --test tests/web/
+        run: node --test tests/web/*.test.cjs
