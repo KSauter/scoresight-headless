@@ -33,6 +33,7 @@ ocr = [
   "tesserocr @ https://github.com/simonflueckiger/tesserocr-windows_build/releases/download/tesserocr-v2.10.0-tesseract-5.5.2/tesserocr-2.10.0-cp313-cp313-win_amd64.whl#sha256=a7f1a56f2c70095d108304e2e76fd6aebd06a42712cb87b8976d52d1e7faf6d8 ; sys_platform == 'win32' and platform_machine == 'AMD64' and python_version == '3.13'",
   "tesserocr @ https://github.com/simonflueckiger/tesserocr-windows_build/releases/download/tesserocr-v2.10.0-tesseract-5.5.2/tesserocr-2.10.0-cp314-cp314-win_amd64.whl#sha256=e7abf40539b852bd25cceadad7a1a3bba9c223556bafa908e2dbf91407080af5 ; sys_platform == 'win32' and platform_machine == 'AMD64' and python_version == '3.14'",
 ]
+ndi = ["ndi-python>=6.3,<7"]
 desktop-legacy = ["pyside6>=6.7,<7", "opencv-python>=4.10,<6"]
 dev = [
   "black==26.5.1",

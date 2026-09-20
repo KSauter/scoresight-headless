@@ -33,6 +33,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from scoresight.capture.decklink import DeckLinkCapture, DeckLinkUnavailable
 from scoresight.capture.mock import MockCapture
+from scoresight.capture.ndi import NDICapture, NDIUnavailable
 from scoresight.capture.opencv import OpenCVCapture
 from scoresight.core.config import ConfigStore, RevisionConflict
 from scoresight.core.deployment import DeploymentSettings
@@ -363,6 +364,7 @@ def create_app(
         errors: list[str] = []
         for source_type, source in (
             ("decklink", DeckLinkCapture),
+            ("ndi", NDICapture),
             ("opencv", OpenCVCapture),
             ("mock", MockCapture),
         ):
@@ -371,7 +373,7 @@ def create_app(
                 discovered.extend(
                     {"type": source_type, **asdict(device)} for device in devices
                 )
-            except DeckLinkUnavailable as exc:
+            except (DeckLinkUnavailable, NDIUnavailable) as exc:
                 errors.append(str(exc))
             except Exception as exc:
                 errors.append(f"{source_type}: {exc}")

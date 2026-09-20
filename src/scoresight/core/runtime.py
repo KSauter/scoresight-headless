@@ -10,6 +10,7 @@ from typing import Any
 
 from scoresight.capture.decklink import DeckLinkCapture
 from scoresight.capture.mock import MockCapture
+from scoresight.capture.ndi import NDICapture
 from scoresight.capture.opencv import OpenCVCapture
 from scoresight.core.config import ConfigStore
 from scoresight.core.models import HealthComponent, HealthSnapshot, ServiceConfig
@@ -156,6 +157,9 @@ class RuntimeController:
         source = config.source
         if source.kind == "decklink":
             return DeckLinkCapture(source.device_id, source.mode)
+        if source.kind == "ndi":
+            # device_id carries the announced NDI name, e.g. "STUDIO (Camera 1)".
+            return NDICapture(source.device_id)
         if source.kind == "mock":
             return MockCapture()
         if source.kind == "opencv":

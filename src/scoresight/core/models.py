@@ -81,7 +81,7 @@ class RegionConfig(BaseModel):
 
 
 class SourceConfig(BaseModel):
-    kind: Literal["decklink", "opencv", "rtsp", "file", "mock"] = "decklink"
+    kind: Literal["decklink", "ndi", "opencv", "rtsp", "file", "mock"] = "decklink"
     device_id: str = "0"
     mode: str = "1080p30"
     uri: str | None = None
