@@ -14,8 +14,13 @@ from scoresight.core.models import (
     ResultField,
     ResultState,
 )
-from scoresight.ocr.base import OcrEngine
-from scoresight.ocr.preprocess import crop_region, preprocess, transform_frame
+from scoresight.ocr.base import OcrEngine, Recognition
+from scoresight.ocr.preprocess import (
+    crop_region,
+    is_blank,
+    preprocess,
+    transform_frame,
+)
 from scoresight.ocr.smoothing import CharacterSmoother
 
 
@@ -54,9 +59,11 @@ class RecognitionPipeline:
         )
         frame_height, frame_width = image.shape[:2]
         enabled_regions = [region for region in self.regions if region.enabled]
+        patches = []
         prepared = []
         for region in enabled_regions:
             patch = crop_region(image, region.rect.pixels(frame_width, frame_height))
+            patches.append(patch)
             prepared.append(preprocess(patch, region.preprocess))
 
         self.latest_previews = {}
@@ -68,19 +75,33 @@ class RecognitionPipeline:
                 if encoded_ok:
                     self.latest_previews[region.id] = encoded.tobytes()
 
-        recognize_many = getattr(self.engine, "recognize_many", None)
-        if callable(recognize_many):
-            recognitions = recognize_many(
-                [
-                    (patch, region.id)
-                    for patch, region in zip(prepared, enabled_regions, strict=True)
+        # Skip the engine for cells preprocessing already judged blank, rather
+        # than inferring it back from the pixels it returned. Asking anyway is
+        # not merely wasteful: Tesseract answers an all-black image with a
+        # digit and a plausible confidence (reproducibly "1" at 0.52 for one
+        # of the penalty cells here). Such a value is then rejected on format,
+        # and a rejection leaves the previous value standing - so a penalty
+        # slot that has emptied keeps showing its last time forever.
+        recognisable = [
+            index
+            for index, region in enumerate(enabled_regions)
+            if not is_blank(patches[index], region.preprocess)
+        ]
+        blank = Recognition("", 0.0)
+        recognitions: list[Recognition] = [blank] * len(prepared)
+
+        if recognisable:
+            requests = [(prepared[i], enabled_regions[i].id) for i in recognisable]
+            recognize_many = getattr(self.engine, "recognize_many", None)
+            if callable(recognize_many):
+                answers = recognize_many(requests)
+            else:
+                answers = [
+                    self.engine.recognize(patch, region_id=region_id)
+                    for patch, region_id in requests
                 ]
-            )
-        else:
-            recognitions = [
-                self.engine.recognize(patch, region_id=region.id)
-                for patch, region in zip(prepared, enabled_regions, strict=True)
-            ]
+            for index, answer in zip(recognisable, answers, strict=True):
+                recognitions[index] = answer
 
         for region, recognition in zip(enabled_regions, recognitions, strict=True):
             value = self._normalize_candidate(recognition.text, region.field_type)

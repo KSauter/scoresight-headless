@@ -16,7 +16,7 @@ from scoresight.core.models import (
 )
 from scoresight.ocr.base import Recognition
 from scoresight.ocr.pipeline import RecognitionPipeline
-from scoresight.ocr.preprocess import preprocess, transform_frame
+from scoresight.ocr.preprocess import is_blank, preprocess, transform_frame
 
 
 class FakeEngine:
@@ -125,9 +125,14 @@ def test_blank_initial_read_is_confirmed_without_turning_into_zero():
 
 
 def frame(sequence: int = 1) -> FramePacket:
+    # Not an all-zero image: the pipeline skips regions without contrast, so a
+    # blank frame would never reach the engine and these tests would assert
+    # against results nobody produced.
+    image = np.zeros((100, 200), dtype=np.uint8)
+    image[10:90, 10:190] = 200
     return FramePacket(
         sequence=sequence,
-        image=np.zeros((100, 200), dtype=np.uint8),
+        image=image,
         width=200,
         height=100,
         captured_at=datetime.now(UTC),
@@ -421,6 +426,78 @@ def test_tenths_are_recognised_through_a_misread_separator() -> None:
     assert normalize("12:34", "time") == "12:34"
     assert normalize("12:.34", "time") == "12:34"
     assert normalize("5:07", "time") == "5:07"
+
+
+def test_blank_check_sees_both_polarities_and_thin_glyphs() -> None:
+    """The measure has to span both ends of the histogram.
+
+    Comparing against the median only detects bright-on-dark: a cell with dark
+    digits on a light background has its median at the background and scores
+    zero. Narrowing the percentiles instead misses a thin glyph that covers a
+    few percent of the area - which is what a "1" in a period cell looks like.
+    """
+    config = PreprocessConfig()
+
+    bright_on_dark = np.full((60, 160), 18, dtype=np.uint8)
+    cv2.putText(bright_on_dark, "1:18", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 230, 3)
+    assert not is_blank(bright_on_dark, config)
+
+    dark_on_bright = np.full((60, 160), 220, dtype=np.uint8)
+    cv2.putText(dark_on_bright, "1:18", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 20, 3)
+    assert not is_blank(dark_on_bright, config)
+
+    thin_glyph = np.full((60, 160), 18, dtype=np.uint8)
+    cv2.putText(thin_glyph, "1", (70, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 230, 3)
+    assert not is_blank(thin_glyph, config)
+
+    rng = np.random.default_rng(7)
+    noise = np.clip(rng.normal(18, 3, (60, 160)), 0, 255).astype(np.uint8)
+    assert is_blank(noise, config)
+
+
+def test_blank_region_is_never_handed_to_the_engine() -> None:
+    """Tesseract answers an all-black image with a digit and a real confidence.
+
+    That value is then rejected on format, and a rejection leaves the previous
+    value in place - so a penalty slot that emptied would keep showing its
+    last time indefinitely.
+    """
+
+    class Loud:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def recognize(self, image, *, region_id: str) -> Recognition:
+            self.calls += 1
+            return Recognition("1", 0.52)
+
+        def close(self) -> None:
+            pass
+
+    region = RegionConfig(
+        id="pen",
+        name="pen",
+        rect=NormalizedRect(x=0, y=0, width=1.0, height=1.0),
+        field_type="number",
+        confirmation_frames=1,
+    )
+    engine = Loud()
+    pipeline = RecognitionPipeline(engine, [region])
+
+    rng = np.random.default_rng(7)
+    noise = np.clip(rng.normal(18, 3, (100, 200)), 0, 255).astype(np.uint8)
+    packet = FramePacket(
+        sequence=1,
+        image=noise,
+        width=200,
+        height=100,
+        captured_at=datetime.now(UTC),
+    )
+    result = pipeline.process(packet).fields[0]
+
+    assert engine.calls == 0, "a blank cell must not reach the engine"
+    assert result.candidate_value == ""
+    assert result.value == ""
 
 
 def test_blank_region_does_not_become_noise() -> None:

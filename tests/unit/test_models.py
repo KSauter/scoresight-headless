@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from scoresight.core.models import NormalizedRect, OutputConfig, RegionConfig, ServiceConfig
+from scoresight.core.models import (
+    NormalizedRect,
+    OutputConfig,
+    RegionConfig,
+    ServiceConfig,
+)
 
 
 def test_normalized_rect_converts_to_pixel_bounds() -> None:
@@ -27,7 +32,9 @@ def test_invalid_normalized_rect_is_rejected(payload: dict[str, float]) -> None:
 def test_region_rejects_invalid_regular_expression() -> None:
     with pytest.raises(ValidationError):
         RegionConfig(
-            name="Clock", rect=NormalizedRect(x=0, y=0, width=0.2, height=0.2), format_regex="["
+            name="Clock",
+            rect=NormalizedRect(x=0, y=0, width=0.2, height=0.2),
+            format_regex="[",
         )
 
 

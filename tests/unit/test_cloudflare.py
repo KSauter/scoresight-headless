@@ -8,7 +8,10 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from scoresight.web.cloudflare import AccessAuthenticationError, CloudflareAccessVerifier
+from scoresight.web.cloudflare import (
+    AccessAuthenticationError,
+    CloudflareAccessVerifier,
+)
 
 TEAM_DOMAIN = "https://scoresight.cloudflareaccess.com"
 AUDIENCE = "scoresight-audience"
@@ -16,7 +19,9 @@ AUDIENCE = "scoresight-audience"
 
 def signing_material(kid: str = "key-1") -> tuple[object, dict[str, object]]:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
     public_jwk.update({"kid": kid, "alg": "RS256", "use": "sig"})
     return private_key, public_jwk
 
@@ -46,7 +51,9 @@ def access_token(
 
 
 def verifier_for(jwks: dict[str, object]) -> CloudflareAccessVerifier:
-    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"keys": [jwks]}))
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(200, json={"keys": [jwks]})
+    )
     return CloudflareAccessVerifier(
         TEAM_DOMAIN,
         AUDIENCE,
@@ -94,9 +101,13 @@ async def test_cloudflare_verifier_refreshes_rotated_key() -> None:
     )
     client = httpx.AsyncClient(transport=transport)
     verifier = CloudflareAccessVerifier(TEAM_DOMAIN, AUDIENCE, client=client)
-    assert (await verifier.verify(access_token(first_private, "first")))["sub"] == "operator-1"
+    assert (await verifier.verify(access_token(first_private, "first")))[
+        "sub"
+    ] == "operator-1"
     active["jwk"] = second_jwk
-    assert (await verifier.verify(access_token(second_private, "second")))["sub"] == "operator-1"
+    assert (await verifier.verify(access_token(second_private, "second")))[
+        "sub"
+    ] == "operator-1"
     await client.aclose()
 
 

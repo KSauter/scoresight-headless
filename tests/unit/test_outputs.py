@@ -20,7 +20,9 @@ def batch() -> ResultBatch:
         sequence=1,
         captured_at=datetime.now(UTC),
         latency_ms=5,
-        fields=[ResultField(id="home", name="Home Score", value="12", state=ResultState.OK)],
+        fields=[
+            ResultField(id="home", name="Home Score", value="12", state=ResultState.OK)
+        ],
     )
 
 
@@ -102,7 +104,9 @@ async def test_output_adapter_recovers_and_manager_stops(monkeypatch) -> None:
     manager = OutputManager(bus)
     output = FlakyOutput("flaky")
     monkeypatch.setattr(manager, "_build", lambda config: output)
-    manager.configure([OutputConfig(id="flaky", kind="file", enabled=True, settings={"path": "x"})])
+    manager.configure(
+        [OutputConfig(id="flaky", kind="file", enabled=True, settings={"path": "x"})]
+    )
     await manager.start()
     await bus.publish(batch())
     for _ in range(20):

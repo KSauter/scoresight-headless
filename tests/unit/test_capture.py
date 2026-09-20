@@ -14,7 +14,11 @@ from scoresight.capture.opencv import OpenCVCapture
 
 def make_frame(sequence: int) -> FramePacket:
     return FramePacket(
-        sequence=sequence, image=object(), width=10, height=10, captured_at=datetime.now(UTC)
+        sequence=sequence,
+        image=object(),
+        width=10,
+        height=10,
+        captured_at=datetime.now(UTC),
     )
 
 
