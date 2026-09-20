@@ -173,10 +173,17 @@ class RecognitionPipeline:
         value = value.strip()
         if field_type == "time":
             value = re.sub(r"\s+", "", value).replace(",", ".")
+            # A doubled separator is the engine reporting both the colon and
+            # the dot of a blinking one, e.g. "56:.5".
+            value = re.sub(r"[:.]{2,}", ":", value)
             # One fractional digit is seconds/tenths; two digits after a dot
             # are the OCR engine's alternative spelling of minutes:seconds.
             if re.fullmatch(r"\d{1,3}\.\d{2}", value):
                 value = value.replace(".", ":")
+            # A separator followed by a single digit is tenths. No clock shows
+            # "MM:S" - below a minute the board switches to "SS.t", and the
+            # engine frequently reads that dot as a colon ("58:7").
+            value = re.sub(r"^(\d{1,2})[:.](\d)$", r"\1.\2", value)
             if value.isdigit() and 3 <= len(value) <= 4:
                 value = f"{value[:-2]}:{value[-2:]}"
         elif field_type == "number":

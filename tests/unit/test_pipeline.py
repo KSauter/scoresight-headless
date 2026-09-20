@@ -383,3 +383,21 @@ def test_clock_rejects_invalid_tenths_without_replacing_accepted_value(text: str
     result = pipeline.process(frame()).fields[0]
     assert result.state == ResultState.REJECTED
     assert result.value == "01:00"
+
+
+def test_tenths_are_recognised_through_a_misread_separator() -> None:
+    """Below a minute the board shows "SS.t" and the engine misreads the dot.
+
+    No clock displays "MM:S", so a separator followed by a single digit can
+    only be tenths. Without this the whole final minute is rejected.
+    """
+    normalize = RecognitionPipeline._normalize_candidate
+    assert normalize("58:7", "time") == "58.7"
+    assert normalize("56:.5", "time") == "56.5"
+    assert normalize("1:2", "time") == "1.2"
+    # Already correct spellings stay untouched.
+    assert normalize("58.7", "time") == "58.7"
+    # Two digits after the separator remain minutes and seconds.
+    assert normalize("12:34", "time") == "12:34"
+    assert normalize("12:.34", "time") == "12:34"
+    assert normalize("5:07", "time") == "5:07"
