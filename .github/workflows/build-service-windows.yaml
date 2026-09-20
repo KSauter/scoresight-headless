@@ -7,6 +7,10 @@ name: Windows service build
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: Versionsnummer fuer den Installer
+        default: "0.0.0"
+        type: string
       python-version:
         description: Interpreter, der mit ins Bundle wandert
         default: "3.12"
@@ -35,7 +39,7 @@ jobs:
       # --extra ocr zieht tesserocr als vorgebautes win_amd64-Wheel aus den in
       # pyproject.toml hinterlegten URLs. Auf Windows wird also nichts kompiliert.
       - name: Abhaengigkeiten aufloesen
-        run: uv sync --locked --extra ocr --python python
+        run: uv sync --locked --extra ocr --extra ndi --python python
 
       - name: PyInstaller ergaenzen
         run: uv pip install pyinstaller
@@ -47,8 +51,27 @@ jobs:
       - name: Bundle starten
         run: dist\scoresight-service\scoresight-service.exe --help
 
+      - name: Version in die .iss schreiben
+        shell: pwsh
+        run: |
+          (Get-Content -Path scoresight-service.iss -Raw) `
+            -replace '@SCORESIGHT_VERSION@', '${{ inputs.version }}' `
+            | Out-File -FilePath scoresight-service.iss -Encoding ASCII
+
+      - name: Installer kompilieren
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
+        with:
+          path: scoresight-service.iss
+          options: /O+
+
       - uses: actions/upload-artifact@v4
         with:
           name: scoresight-service-windows-py${{ inputs.python-version }}
           path: dist/scoresight-service
+          retention-days: 90
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scoresight-service-setup
+          path: dist/scoresight-service-setup.exe
           retention-days: 90
