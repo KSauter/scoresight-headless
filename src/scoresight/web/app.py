@@ -186,10 +186,40 @@ def create_app(
             )
         return response
 
+    def _signed_in_response(request: Request) -> Response:
+        """Redirect to the dashboard with the session cookies attached."""
+        secure = deployment.secure_cookies or request.url.scheme == "https"
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            ADMIN_COOKIE,
+            store.load().security.admin_token,
+            httponly=True,
+            secure=secure,
+            samesite="strict",
+        )
+        response.set_cookie(
+            CSRF_COOKIE,
+            new_csrf_token(),
+            httponly=False,
+            secure=secure,
+            samesite="strict",
+        )
+        return response
+
     @app.get("/login", response_class=HTMLResponse)
-    async def login_page(request: Request) -> Response:
+    async def login_page(request: Request, token: str | None = None) -> Response:
         if deployment.auth_mode != "token":
             raise HTTPException(status_code=404, detail="local login is disabled")
+        # A token in the query string signs the caller straight in. The service
+        # prints this link on startup so the operator never has to select the
+        # token out of a console window, which on Windows means enabling
+        # QuickEdit first. Log redaction already strips "?token=".
+        if token is not None:
+            if not secrets.compare_digest(token, store.load().security.admin_token):
+                return templates.TemplateResponse(
+                    request, "login.html", {"error": True}, status_code=401
+                )
+            return _signed_in_response(request)
         return templates.TemplateResponse(request, "login.html", {"error": False})
 
     @app.post("/login", response_class=HTMLResponse)
@@ -200,22 +230,7 @@ def create_app(
             return templates.TemplateResponse(
                 request, "login.html", {"error": True}, status_code=401
             )
-        response = RedirectResponse("/", status_code=303)
-        response.set_cookie(
-            ADMIN_COOKIE,
-            token,
-            httponly=True,
-            secure=deployment.secure_cookies or request.url.scheme == "https",
-            samesite="strict",
-        )
-        response.set_cookie(
-            CSRF_COOKIE,
-            new_csrf_token(),
-            httponly=False,
-            secure=deployment.secure_cookies or request.url.scheme == "https",
-            samesite="strict",
-        )
-        return response
+        return _signed_in_response(request)
 
     @app.post("/logout")
     async def logout(_: None = Depends(security.require_admin_csrf)) -> Response:
