@@ -2,14 +2,21 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import cv2
 import numpy as np
 import pytest
 
 from scoresight.capture.base import FramePacket
-from scoresight.core.models import NormalizedRect, Point, RegionConfig, ResultState
+from scoresight.core.models import (
+    NormalizedRect,
+    Point,
+    PreprocessConfig,
+    RegionConfig,
+    ResultState,
+)
 from scoresight.ocr.base import Recognition
 from scoresight.ocr.pipeline import RecognitionPipeline
-from scoresight.ocr.preprocess import transform_frame
+from scoresight.ocr.preprocess import preprocess, transform_frame
 
 
 class FakeEngine:
@@ -35,7 +42,9 @@ class FakeBatchEngine(FakeEngine):
         return [next(self.recognitions) for _ in requests]
 
 
-@pytest.mark.parametrize("field_type,value", [("number", "27"), ("time", "1:49"), ("text", "A")])
+@pytest.mark.parametrize(
+    "field_type,value", [("number", "27"), ("time", "1:49"), ("text", "A")]
+)
 @pytest.mark.parametrize("smoothing_window", [1, 5])
 def test_confirmed_blank_clears_value_and_smoothing(
     field_type, value, smoothing_window, monkeypatch
@@ -166,7 +175,10 @@ def test_pipeline_rejects_low_confidence_and_invalid_format() -> None:
         FakeEngine([Recognition("1", 0.2), Recognition("BAD", 0.99)]), regions
     )
     result = pipeline.process(frame())
-    assert [field.state for field in result.fields] == [ResultState.REJECTED, ResultState.REJECTED]
+    assert [field.state for field in result.fields] == [
+        ResultState.REJECTED,
+        ResultState.REJECTED,
+    ]
 
 
 def test_rejected_candidate_does_not_replace_last_accepted_value() -> None:
@@ -355,7 +367,9 @@ def test_clock_switches_between_minutes_and_tenths(smoothing_window: int) -> Non
         ("1234", "12:34"),
     ],
 )
-def test_clock_preserves_tenths_and_normalizes_minutes(text: str, expected: str) -> None:
+def test_clock_preserves_tenths_and_normalizes_minutes(
+    text: str, expected: str
+) -> None:
     region = RegionConfig(
         name="Clock",
         rect=NormalizedRect(x=0, y=0, width=0.5, height=0.5),
@@ -373,7 +387,9 @@ def test_clock_preserves_tenths_and_normalizes_minutes(text: str, expected: str)
 # of "SS.t" as a colon often enough to lose the whole final minute otherwise.
 # Values that are out of range for tenths, such as "60.0", stay rejected.
 @pytest.mark.parametrize("text", ["60.0", "99.9", "123.4", "59.", ".9", "-1.0"])
-def test_clock_rejects_invalid_tenths_without_replacing_accepted_value(text: str) -> None:
+def test_clock_rejects_invalid_tenths_without_replacing_accepted_value(
+    text: str,
+) -> None:
     region = RegionConfig(
         name="Clock",
         rect=NormalizedRect(x=0, y=0, width=0.5, height=0.5),
@@ -405,3 +421,29 @@ def test_tenths_are_recognised_through_a_misread_separator() -> None:
     assert normalize("12:34", "time") == "12:34"
     assert normalize("12:.34", "time") == "12:34"
     assert normalize("5:07", "time") == "5:07"
+
+
+def test_blank_region_does_not_become_noise() -> None:
+    """An unlit scoreboard cell must not be thresholded into digits.
+
+    Otsu assumes two brightness classes. Given only sensor noise it splits
+    that into a high-frequency pattern, and the engine reads digits from it -
+    which is how empty penalty slots produced values like "3:10".
+    """
+    rng = np.random.default_rng(7)
+    noise = np.clip(rng.normal(18, 3, (60, 160)), 0, 255).astype(np.uint8)
+
+    result = preprocess(noise, PreprocessConfig())
+    assert result.max() == 0, "a blank cell must yield no foreground at all"
+
+    # Disabling the check restores the previous behaviour.
+    unguarded = preprocess(noise, PreprocessConfig(min_contrast=0.0))
+    assert unguarded.max() == 255
+
+
+def test_occupied_region_survives_the_blank_check() -> None:
+    patch = np.full((60, 160), 18, dtype=np.uint8)
+    cv2.putText(patch, "1:18", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 230, 3)
+
+    result = preprocess(patch, PreprocessConfig())
+    assert result.max() == 255, "digits must still come through"

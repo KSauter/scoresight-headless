@@ -739,7 +739,7 @@ canvas.addEventListener('pointerup', (event) => {
     return;
   }
   selectedId = crypto.randomUUID();
-  config.regions.push({id: selectedId, name: `Region ${config.regions.length + 1}`, rect, enabled: true, field_type: 'time', format_regex: '^.*$', confidence_threshold: .5, confirmation_frames: 2, smoothing_window: 1, remove_leading_zeros: false, preprocess: {threshold_method: 'otsu', invert: false, dilate_iterations: 0, vertical_scale: 1, autocrop: false, skip_similar: true, similarity_threshold: .02}});
+  config.regions.push({id: selectedId, name: `Region ${config.regions.length + 1}`, rect, enabled: true, field_type: 'time', format_regex: '^.*$', confidence_threshold: .5, confirmation_frames: 2, smoothing_window: 1, remove_leading_zeros: false, preprocess: {threshold_method: 'otsu', invert: false, dilate_iterations: 0, vertical_scale: 1, autocrop: false, min_contrast: 25, skip_similar: true, similarity_threshold: .02}});
   updateRegionEditor(); render();
 });
 

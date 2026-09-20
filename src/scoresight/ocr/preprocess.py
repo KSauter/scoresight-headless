@@ -82,6 +82,14 @@ def preprocess(image: Any, config: PreprocessConfig) -> Any:
     patch = image
     if len(patch.shape) == 3:
         patch = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+    if config.min_contrast and patch.size:
+        # Percentiles rather than min/max: a single hot pixel or a reflection
+        # must not make an unlit cell look occupied.
+        bright, mid = np.percentile(patch, (99, 50))
+        if bright - mid < config.min_contrast:
+            # Hand back a uniform patch. Thresholding noise would invent
+            # digits, and every downstream stage treats blank as "no text".
+            return np.zeros_like(patch)
     if config.threshold_method == "otsu":
         _, patch = cv2.threshold(patch, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     elif config.threshold_method == "adaptive":

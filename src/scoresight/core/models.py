@@ -53,6 +53,14 @@ class PreprocessConfig(BaseModel):
     dilate_iterations: int = Field(default=0, ge=0, le=10)
     vertical_scale: float = Field(default=1.0, ge=0.1, le=3.0)
     autocrop: bool = False
+    # Minimum contrast, as the difference between the 99th and the 50th
+    # percentile of the grayscale patch, below which the region counts as
+    # blank. Otsu assumes two brightness classes; on an unlit scoreboard cell
+    # there is only sensor noise, and it happily splits that into a
+    # high-frequency pattern the engine then reads digits from. Measured on a
+    # live board: occupied cells land at 206-218, empty ones at 5-14.
+    # Zero disables the check.
+    min_contrast: float = Field(default=25.0, ge=0.0, le=255.0)
     skip_similar: bool = True
     similarity_threshold: float = Field(default=0.02, ge=0.0, le=1.0)
 
