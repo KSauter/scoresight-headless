@@ -1,0 +1,54 @@
+# Baut den headless Service (scoresight-service.spec) als Windows-Bundle.
+#
+# Der geerbte build.yaml baut ausschliesslich scoresight.spec, also die alte
+# Qt-Desktop-App. Fuer src/scoresight/ gab es bisher keinen Binaerbuild.
+name: Windows service build
+
+on:
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: Interpreter, der mit ins Bundle wandert
+        default: "3.12"
+        type: choice
+        options:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: uv installieren
+        run: python -m pip install uv
+
+      # --extra ocr zieht tesserocr als vorgebautes win_amd64-Wheel aus den in
+      # pyproject.toml hinterlegten URLs. Auf Windows wird also nichts kompiliert.
+      - name: Abhaengigkeiten aufloesen
+        run: uv sync --locked --extra ocr --python python
+
+      - name: PyInstaller ergaenzen
+        run: uv pip install pyinstaller
+
+      - name: Bundle bauen
+        run: uv run pyinstaller --clean --noconfirm scoresight-service.spec
+
+      # Ein Bundle, das nicht startet, faellt sonst erst beim Anwender auf.
+      - name: Bundle starten
+        run: dist\scoresight-service\scoresight-service.exe --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scoresight-service-windows-py${{ inputs.python-version }}
+          path: dist/scoresight-service
+          retention-days: 90
