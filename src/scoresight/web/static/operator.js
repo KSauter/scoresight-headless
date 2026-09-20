@@ -40,10 +40,70 @@ async function api(url, options = {}) {
   return response.json();
 }
 
+// Only DeckLink negotiates a mode; the other backends take whatever the sender
+// or the driver provides, so the field is hidden for them.
+const MODE_KINDS = ['decklink'];
+
+// Fallback list for when discovery has not run or the card reports no modes.
+// DeckLink accepts the id as free text, so CUSTOM keeps that path open.
+const FALLBACK_MODES = [
+  '1080p25', '1080p30', '1080p50', '1080p60',
+  '1080i50', '1080i60', '720p50', '720p60', '2160p25', '2160p30',
+];
+
+function modeOptionsForCurrentDevice() {
+  const deviceId = byId('source-device').value;
+  const device = discoveredDevices.find(
+    (candidate) => candidate.type === byId('source-kind').value && candidate.id === deviceId,
+  );
+  // Modes reported by the card itself beat the generic list.
+  if (device && device.modes && device.modes.length) {
+    return device.modes.map((mode) => ({
+      value: mode.id,
+      label: `${mode.id} (${mode.width}x${mode.height} @ ${mode.frames_per_second})`,
+    }));
+  }
+  return FALLBACK_MODES.map((id) => ({value: id, label: id}));
+}
+
+function renderModeOptions() {
+  const select = byId('source-mode-preset');
+  const custom = byId('source-mode');
+  const applies = MODE_KINDS.includes(byId('source-kind').value);
+
+  select.hidden = !applies;
+  byId('label-source-mode').hidden = !applies;
+  if (!applies) { custom.hidden = true; return; }
+
+  const options = modeOptionsForCurrentDevice();
+  const current = custom.value;
+  const known = options.some((option) => option.value === current);
+
+  select.replaceChildren(...options.map((option) => {
+    const element = document.createElement('option');
+    element.value = option.value; element.textContent = option.label;
+    return element;
+  }), Object.assign(document.createElement('option'), {value: 'CUSTOM', textContent: 'Custom...'}));
+
+  select.value = known ? current : 'CUSTOM';
+  custom.hidden = known;
+}
+
+byId('source-mode-preset').addEventListener('change', () => {
+  const select = byId('source-mode-preset');
+  const custom = byId('source-mode');
+  if (select.value === 'CUSTOM') { custom.hidden = false; custom.focus(); return; }
+  custom.hidden = true;
+  custom.value = select.value;
+});
+
+byId('source-device').addEventListener('change', renderModeOptions);
+
 function bindConfig() {
   byId('source-kind').value = config.source.kind;
   byId('source-device').value = config.source.device_id;
   byId('source-mode').value = config.source.mode;
+  renderModeOptions();
   byId('target-hz').value = config.ocr.target_hz;
   byId('ocr-workers').value = config.ocr.workers;
   byId('ocr-model').value = config.ocr.model;
@@ -483,11 +543,39 @@ byId('save-config').onclick = async () => {
   catch (error) { toast(error.message, true); }
 };
 
+// Discovery reports every capture type at once. The suggestions are filtered to
+// the selected one, otherwise picking an NDI name while DirectShow is active
+// would produce a device id the runtime cannot open.
+let discoveredDevices = [];
+
+function renderDeviceOptions() {
+  const kind = byId('source-kind').value;
+  const matching = discoveredDevices.filter((device) => device.type === kind);
+  byId('source-device-options').replaceChildren(...matching.map((device) => {
+    const option = document.createElement('option');
+    option.value = device.id;
+    // NDI announces "HOST (Source)", where id and name are the same; for
+    // cameras the label carries the only readable part.
+    if (device.name && device.name !== device.id) option.label = device.name;
+    return option;
+  }));
+  return matching.length;
+}
+
+byId('source-kind').addEventListener('change', () => { renderDeviceOptions(); renderModeOptions(); });
+
 byId('refresh-sources').onclick = async () => {
   try {
     const result = await api('/api/v1/sources');
     byId('source-errors').textContent = result.errors.join(' ');
-    if (result.devices.length) toast(`Found ${result.devices.length} source device(s)`); else toast('No capture devices found', true);
+    discoveredDevices = result.devices;
+    const matching = renderDeviceOptions();
+    if (!result.devices.length) { toast('No capture devices found', true); return; }
+    if (!matching) {
+      toast(`Found ${result.devices.length} device(s), none of type ${byId('source-kind').value}`, true);
+      return;
+    }
+    toast(`Found ${matching} ${byId('source-kind').value} device(s) - open the Device field to pick one`);
   } catch (error) { toast(error.message, true); }
 };
 
