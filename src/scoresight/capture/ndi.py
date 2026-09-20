@@ -134,7 +134,9 @@ class NDICapture:
 
         receiver = ndi.recv_create_v3(settings)
         if receiver is None:
-            raise RuntimeError(f"could not create NDI receiver for {self.source_name!r}")
+            raise RuntimeError(
+                f"could not create NDI receiver for {self.source_name!r}"
+            )
         ndi.recv_connect(receiver, source)
         self._receiver = receiver
 

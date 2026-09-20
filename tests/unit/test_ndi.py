@@ -28,9 +28,10 @@ class FakeVideoFrame:
         self.yres = height
         self.line_stride_in_bytes = stride if stride is not None else width * 4
         rows = []
-        for row in range(height):
+        for _row in range(height):
             pixels = np.tile(
-                np.array([10, 20, 30, 255], dtype=np.uint8), (self.line_stride_in_bytes // 4, 1)
+                np.array([10, 20, 30, 255], dtype=np.uint8),
+                (self.line_stride_in_bytes // 4, 1),
             )
             # Mark the padding so a wrong slice shows up as a colour shift.
             pixels[width:] = [99, 99, 99, 255]
@@ -79,7 +80,9 @@ class FakeNDIlib(types.ModuleType):
     def recv_connect(self, receiver, source):
         return None
 
-    def recv_capture_v3(self, receiver, timeout_ms, want_video, want_audio, want_metadata):
+    def recv_capture_v3(
+        self, receiver, timeout_ms, want_video, want_audio, want_metadata
+    ):
         assert want_video is True
         assert want_audio is False, "audio must be declined at the source"
         assert want_metadata is False, "metadata must be declined at the source"
@@ -112,7 +115,10 @@ def fake_ndi(monkeypatch):
 def test_discover_maps_announced_names(fake_ndi):
     fake_ndi(["STUDIO (Camera 1)", "OB-VAN (Programme)"], [])
     devices = NDICapture.discover(0.1)
-    assert [device.id for device in devices] == ["STUDIO (Camera 1)", "OB-VAN (Programme)"]
+    assert [device.id for device in devices] == [
+        "STUDIO (Camera 1)",
+        "OB-VAN (Programme)",
+    ]
     assert devices[0].name == "STUDIO (Camera 1)"
 
 
@@ -147,7 +153,9 @@ def test_frame_drops_alpha_and_stride_padding(fake_ndi):
     assert packet.image.shape == (4, 8, 3), "alpha channel must be dropped"
     assert packet.image.flags["C_CONTIGUOUS"], "preprocess needs a contiguous buffer"
     # Padding must not bleed into the image.
-    assert np.array_equal(np.unique(packet.image.reshape(-1, 3), axis=0), np.array([[10, 20, 30]]))
+    assert np.array_equal(
+        np.unique(packet.image.reshape(-1, 3), axis=0), np.array([[10, 20, 30]])
+    )
 
 
 def test_video_frame_is_always_returned_to_the_sdk(fake_ndi):
