@@ -3,3 +3,41 @@
 .workspace{grid-template-columns:minmax(560px,1fr) minmax(380px,520px)}
 .checks{flex-wrap:wrap}.results-table-wrap{overflow-x:auto}.results-table{min-width:620px}.results-table th,.results-table td{vertical-align:middle}.result-thumbnail{display:block;width:96px;height:48px;border:1px solid #314652;border-radius:4px;background:#05080a}.result-preview-empty{width:112px;color:var(--muted);text-align:center}.filter-preview-card{display:grid;gap:.6rem;margin-top:1rem;padding:.75rem;border:1px solid var(--line);border-radius:8px;background:#0b1217}.filter-preview-card .panel-heading{font-size:.82rem}.result-state{color:var(--cyan);text-transform:capitalize}.filter-preview-shell{display:grid;min-height:96px;place-items:center;overflow:hidden;border:1px solid #314652;border-radius:6px;background:#05080a}.filter-preview-shell img{display:block;max-width:100%;max-height:150px;image-rendering:pixelated}.filter-preview-shell span{color:var(--muted);font-size:.8rem}.recognition-values{display:grid;grid-template-columns:auto 1fr;gap:.25rem .75rem;margin:0}.recognition-values dt{color:var(--muted)}.recognition-values dd{margin:0;overflow-wrap:anywhere;color:var(--text);font:600 .9rem ui-monospace,SFMono-Regular,Consolas,monospace}
 @media(max-width:1050px){.workspace{grid-template-columns:1fr}.stage{position:static}.controls{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}}
+
+/* Output adapter editor */
+.output-card {
+  border: 1px solid var(--border, #2a3344);
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.output-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+/* The base rule sets width:100% on every input, which in a flex row makes the
+   checkbox claim the space and squeezes the type dropdown down to its arrow.
+   The existing .checks exception only covers that one container. */
+.output-card input[type="checkbox"],
+.output-card-head input[type="checkbox"] { width: auto; flex: none; }
+.output-card-head select { flex: 1 1 auto; min-width: 9rem; }
+.output-card-head button { flex: none; }
+.output-card label {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  opacity: 0.85;
+}
+.output-card .inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 0.9rem;
+  font-size: 0.82rem;
+}
+.mapping-row { display: flex; gap: 0.35rem; margin-top: 0.25rem; }
+.mapping-row input { flex: 1; min-width: 0; }
+#outputs-raw { margin-top: 0.5rem; }
+#outputs-raw summary { cursor: pointer; font-size: 0.82rem; opacity: 0.8; }

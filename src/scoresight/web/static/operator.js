@@ -99,6 +99,252 @@ byId('source-mode-preset').addEventListener('change', () => {
 
 byId('source-device').addEventListener('change', renderModeOptions);
 
+// Output adapter editor.
+//
+// The schema mirrors OutputManager._build: every field here is one the adapter
+// actually reads, and the required ones are those OutputConfig validates. Keys
+// the editor does not know are preserved untouched, so a hand-written setting
+// survives a round trip through the form.
+const OUTPUT_SCHEMA = {
+  vmix: {
+    label: 'vMix',
+    fields: [
+      {key: 'host', label: 'Host', placeholder: 'localhost'},
+      {key: 'port', label: 'Port', type: 'number', placeholder: '8099'},
+      {key: 'input', label: 'Input', placeholder: '1'},
+    ],
+    mapping: 'Region name to vMix text field',
+    sendUnchanged: true,
+  },
+  uno: {
+    label: 'UNO / Overlays',
+    fields: [
+      {key: 'endpoint', label: 'Endpoint URL', required: true, placeholder: 'https://app.overlays.uno/apiv2/controlapps/.../api'},
+      {key: 'overlay_id', label: 'Overlay id (optional)'},
+    ],
+    mapping: 'Region name to UNO command or field id',
+    sendUnchanged: true,
+  },
+  webhook: {
+    label: 'Webhook (HTTP)',
+    fields: [
+      {key: 'url', label: 'URL', required: true, placeholder: 'http://127.0.0.1:9876/game/ocr'},
+      {key: 'method', label: 'Method', type: 'select', options: ['POST', 'PUT', 'PATCH', 'GET'], placeholder: 'POST'},
+    ],
+    // HttpOutput takes neither a field mapping nor send_unchanged; it always
+    // posts the whole batch.
+    mapping: null,
+    sendUnchanged: false,
+    note: 'Sends the full result batch as JSON. Every field is included, with its state.',
+  },
+  file: {
+    label: 'File',
+    fields: [{key: 'path', label: 'Path', required: true, placeholder: 'C:\\scoresight\\results'}],
+    mapping: null,
+    sendUnchanged: false,
+  },
+  fan_site: {
+    label: 'Fan site (WebSocket)',
+    fields: [
+      {key: 'endpoint', label: 'Endpoint', required: true, placeholder: 'wss://example.org/ocr'},
+      {key: 'stream_id', label: 'Stream id', required: true},
+      {key: 'token', label: 'Token'},
+      {key: 'token_env', label: 'Token from environment variable', placeholder: 'SCORESIGHT_FAN_SITE_TOKEN'},
+      {key: 'origin', label: 'Origin (optional)'},
+      {key: 'timeout', label: 'Timeout (s)', type: 'number', placeholder: '5'},
+    ],
+    mapping: 'Region name to fan-site field',
+    sendUnchanged: true,
+    note: 'Needs one of token, token_file or token_env.',
+  },
+};
+
+function newOutputId() {
+  return (crypto.randomUUID && crypto.randomUUID()) ||
+    `output-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function outputField(output, spec) {
+  const wrapper = document.createElement('div');
+  const label = document.createElement('label');
+  label.textContent = spec.required ? `${spec.label} *` : spec.label;
+  let input;
+  if (spec.type === 'select') {
+    input = document.createElement('select');
+    input.replaceChildren(...spec.options.map((value) => {
+      const option = document.createElement('option');
+      option.value = value; option.textContent = value;
+      return option;
+    }));
+    input.value = output.settings[spec.key] ?? spec.options[0];
+  } else {
+    input = document.createElement('input');
+    if (spec.type === 'number') input.type = 'number';
+    input.placeholder = spec.placeholder || '';
+    input.value = output.settings[spec.key] ?? '';
+  }
+  input.oninput = input.onchange = () => {
+    const raw = input.value.trim();
+    // An empty optional field is removed rather than stored as "", which the
+    // adapters would treat as a configured empty value.
+    if (!raw) { delete output.settings[spec.key]; syncOutputsJson(); return; }
+    output.settings[spec.key] = spec.type === 'number' ? Number(raw) : raw;
+    syncOutputsJson();
+  };
+  label.appendChild(input);
+  wrapper.appendChild(label);
+  return wrapper;
+}
+
+function mappingEditor(output, hint) {
+  const box = document.createElement('div');
+  const caption = document.createElement('label');
+  caption.textContent = hint;
+  box.appendChild(caption);
+
+  const rows = document.createElement('div');
+  const draw = () => {
+    rows.replaceChildren(...Object.entries(output.field_mapping).map(([from, to]) => {
+      const row = document.createElement('div');
+      row.className = 'mapping-row';
+      const source = document.createElement('input');
+      source.value = from; source.placeholder = 'Region name';
+      const target = document.createElement('input');
+      target.value = to; target.placeholder = 'Target';
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.textContent = '-';
+      source.onchange = () => {
+        const renamed = source.value.trim();
+        if (!renamed || renamed === from) { source.value = from; return; }
+        delete output.field_mapping[from];
+        output.field_mapping[renamed] = target.value;
+        syncOutputsJson(); draw();
+      };
+      target.oninput = () => { output.field_mapping[from] = target.value; syncOutputsJson(); };
+      remove.onclick = () => { delete output.field_mapping[from]; syncOutputsJson(); draw(); };
+      row.append(source, target, remove);
+      return row;
+    }));
+  };
+  draw();
+  box.appendChild(rows);
+
+  const add = document.createElement('button');
+  add.type = 'button'; add.textContent = 'Add mapping';
+  add.onclick = () => {
+    let name = 'Clock.Text';
+    while (name in output.field_mapping) name += '2';
+    output.field_mapping[name] = '';
+    syncOutputsJson(); draw();
+  };
+  box.appendChild(add);
+  return box;
+}
+
+function outputCard(output) {
+  const card = document.createElement('div');
+  card.className = 'output-card';
+
+  const head = document.createElement('div');
+  head.className = 'output-card-head';
+
+  const enabled = document.createElement('input');
+  enabled.type = 'checkbox'; enabled.checked = Boolean(output.enabled);
+  enabled.title = 'Enabled';
+  enabled.onchange = () => { output.enabled = enabled.checked; syncOutputsJson(); };
+
+  const kind = document.createElement('select');
+  kind.replaceChildren(...Object.entries(OUTPUT_SCHEMA).map(([value, schema]) => {
+    const option = document.createElement('option');
+    option.value = value; option.textContent = schema.label;
+    return option;
+  }));
+  kind.value = output.kind;
+  kind.onchange = () => {
+    output.kind = kind.value;
+    // Settings of the previous kind would fail validation on the new one.
+    output.settings = {};
+    renderOutputs();
+  };
+
+  const remove = document.createElement('button');
+  remove.type = 'button'; remove.textContent = 'Delete';
+  remove.onclick = () => {
+    config.outputs = config.outputs.filter((candidate) => candidate !== output);
+    renderOutputs();
+  };
+
+  head.append(enabled, kind, remove);
+  card.appendChild(head);
+
+  const schema = OUTPUT_SCHEMA[output.kind];
+  if (!schema) {
+    const unknown = document.createElement('p');
+    unknown.className = 'hint';
+    unknown.textContent = `Unknown adapter type "${output.kind}" - edit it in the raw JSON.`;
+    card.appendChild(unknown);
+    return card;
+  }
+
+  if (schema.note) {
+    const note = document.createElement('p');
+    note.className = 'hint'; note.textContent = schema.note;
+    card.appendChild(note);
+  }
+
+  schema.fields.forEach((spec) => card.appendChild(outputField(output, spec)));
+
+  if (schema.sendUnchanged) {
+    const toggle = document.createElement('label');
+    toggle.className = 'inline-toggle';
+    const box = document.createElement('input');
+    box.type = 'checkbox'; box.checked = Boolean(output.send_unchanged);
+    box.onchange = () => { output.send_unchanged = box.checked; syncOutputsJson(); };
+    toggle.append(box, document.createTextNode('Also send unchanged values'));
+    card.appendChild(toggle);
+  }
+
+  if (schema.mapping) card.appendChild(mappingEditor(output, schema.mapping));
+
+  return card;
+}
+
+function syncOutputsJson() {
+  byId('outputs-json').value = JSON.stringify(config.outputs, null, 2);
+}
+
+function renderOutputs() {
+  config.outputs.forEach((output) => {
+    output.settings = output.settings || {};
+    output.field_mapping = output.field_mapping || {};
+  });
+  byId('outputs-editor').replaceChildren(...config.outputs.map(outputCard));
+  byId('outputs-empty').hidden = config.outputs.length > 0;
+  syncOutputsJson();
+}
+
+byId('add-output').onclick = () => {
+  config.outputs.push({
+    id: newOutputId(), kind: 'webhook', enabled: false,
+    settings: {}, field_mapping: {}, send_unchanged: false,
+  });
+  renderOutputs();
+};
+
+byId('apply-outputs-json').onclick = () => {
+  const error = byId('outputs-json-error');
+  try {
+    const parsed = JSON.parse(byId('outputs-json').value || '[]');
+    if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
+    config.outputs = parsed;
+    error.textContent = '';
+    renderOutputs();
+    toast('Adapters updated from JSON');
+  } catch (problem) {
+    error.textContent = problem.message;
+  }
+};
+
 function bindConfig() {
   byId('source-kind').value = config.source.kind;
   byId('source-device').value = config.source.device_id;
@@ -107,7 +353,7 @@ function bindConfig() {
   byId('target-hz').value = config.ocr.target_hz;
   byId('ocr-workers').value = config.ocr.workers;
   byId('ocr-model').value = config.ocr.model;
-  byId('outputs-json').value = JSON.stringify(config.outputs, null, 2);
+  renderOutputs();
   pruneAcceptedPreviews();
   updateRegionEditor();
   render();
@@ -120,7 +366,7 @@ function collectConfig() {
   config.ocr.target_hz = Number(byId('target-hz').value);
   config.ocr.workers = Number(byId('ocr-workers').value);
   config.ocr.model = byId('ocr-model').value;
-  config.outputs = JSON.parse(byId('outputs-json').value || '[]');
+  // The form is authoritative; the raw JSON mirrors it and is applied explicitly.
   delete config.security;
   return config;
 }

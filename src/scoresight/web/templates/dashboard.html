@@ -134,9 +134,16 @@
         </section>
 
         <section class="panel">
-          <h2>Output adapters</h2>
-          <p class="hint">Configure vMix, UNO, webhooks, files, and the live fan-site OCR WebSocket as validated JSON. Fan-site mappings use accepted names such as Clock.Text, score_a, score_b, and period.</p>
-          <textarea id="outputs-json" rows="10" spellcheck="false"></textarea>
+          <div class="panel-heading"><h2>Output adapters</h2><button id="add-output">Add</button></div>
+          <p class="hint">Send accepted OCR values to vMix, UNO, a webhook, a file, or the live fan-site WebSocket. Field mappings use accepted region names such as Clock.Text, score_a, score_b, and period.</p>
+          <div id="outputs-editor"></div>
+          <p id="outputs-empty" class="hint">No adapters configured.</p>
+          <details id="outputs-raw">
+            <summary>Raw JSON</summary>
+            <textarea id="outputs-json" rows="10" spellcheck="false"></textarea>
+            <button id="apply-outputs-json">Apply JSON</button>
+            <p id="outputs-json-error" class="error"></p>
+          </details>
           <ul id="output-status" class="compact-list"></ul>
         </section>
 
