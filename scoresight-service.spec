@@ -4,6 +4,12 @@ from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 hiddenimports = collect_submodules("uvicorn")
 
+# TesseractEngine imports tesserocr inside a method so the module is only
+# loaded when OCR is actually used. Static analysis does not see that import,
+# so without naming it here PyInstaller ships the extension as a loose binary
+# and "import tesserocr" fails at runtime.
+hiddenimports += ["tesserocr"]
+
 # NDI is optional: the service must still build where ndi-python is absent.
 # The package ships the native runtime (Processing.NDI.Lib.*), which
 # collect_dynamic_libs picks up alongside the extension module.
@@ -26,7 +32,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=["pyinstaller_runtime_hook.py"],
     excludes=["PySide6"],
     noarchive=False,
 )

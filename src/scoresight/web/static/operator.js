@@ -349,6 +349,7 @@ function bindConfig() {
   byId('source-kind').value = config.source.kind;
   byId('source-device').value = config.source.device_id;
   byId('source-mode').value = config.source.mode;
+  renderDeviceOptions();
   renderModeOptions();
   byId('target-hz').value = config.ocr.target_hz;
   byId('ocr-workers').value = config.ocr.workers;
@@ -794,19 +795,52 @@ byId('save-config').onclick = async () => {
 // would produce a device id the runtime cannot open.
 let discoveredDevices = [];
 
+// Kinds whose device field is an address the operator types, not something
+// discovery can enumerate.
+const TYPED_DEVICE_KINDS = ['rtsp', 'file'];
+
+const DEVICE_CUSTOM = '\u0000custom';
+
 function renderDeviceOptions() {
   const kind = byId('source-kind').value;
+  const select = byId('source-device-preset');
+  const custom = byId('source-device');
   const matching = discoveredDevices.filter((device) => device.type === kind);
-  byId('source-device-options').replaceChildren(...matching.map((device) => {
+
+  // A datalist only drops down while typing, so an operator facing an empty
+  // field has no way to see what discovery found. A select always opens.
+  if (TYPED_DEVICE_KINDS.includes(kind) || !matching.length) {
+    select.hidden = true;
+    custom.hidden = false;
+    return matching.length;
+  }
+
+  select.hidden = false;
+  select.replaceChildren(...matching.map((device) => {
     const option = document.createElement('option');
     option.value = device.id;
     // NDI announces "HOST (Source)", where id and name are the same; for
-    // cameras the label carries the only readable part.
-    if (device.name && device.name !== device.id) option.label = device.name;
+    // cameras the name carries the only readable part.
+    option.textContent = device.name && device.name !== device.id
+      ? `${device.name} (${device.id})` : device.id;
     return option;
-  }));
+  }), Object.assign(document.createElement('option'),
+    {value: DEVICE_CUSTOM, textContent: 'Enter manually...'}));
+
+  const known = matching.some((device) => device.id === custom.value);
+  select.value = known ? custom.value : DEVICE_CUSTOM;
+  custom.hidden = known;
   return matching.length;
 }
+
+byId('source-device-preset').addEventListener('change', () => {
+  const select = byId('source-device-preset');
+  const custom = byId('source-device');
+  if (select.value === DEVICE_CUSTOM) { custom.hidden = false; custom.focus(); return; }
+  custom.hidden = true;
+  custom.value = select.value;
+  renderModeOptions();
+});
 
 byId('source-kind').addEventListener('change', () => { renderDeviceOptions(); renderModeOptions(); });
 
