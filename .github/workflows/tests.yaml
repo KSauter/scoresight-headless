@@ -1,0 +1,61 @@
+# Prueft, was in den Fork gepusht wird: Linting, Typen, Python- und Web-Tests.
+#
+# Der geerbte quality.yaml deckt dasselbe ab, baut aber zusaetzlich ein
+# Container-Image und veroeffentlicht es in die Registry - unerwuenscht fuer
+# einen Fork, der nur Windows-Artefakte braucht. Die Web-Tests unter tests/web
+# laufen dort ueberhaupt nicht.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install uv
+
+      # --extra ocr, damit die Tesseract-Anbindung mitgeprueft wird; ohne sie
+      # laeuft der Dienst zwar, liefert aber keine Ergebnisse.
+      - name: Abhaengigkeiten aufloesen
+        run: uv sync --locked --extra dev --extra ocr --python python
+
+      - name: Formatierung
+        run: uv run black --check ./src --exclude "/ui_.*\.py"
+
+      - name: Linting
+        run: uv run ruff check src/scoresight tests
+
+      - name: Typen
+        run: uv run mypy --python-version "${{ matrix.python }}" -p scoresight
+
+      # decklink_hardware verlangt eine Blackmagic-Karte im Rechner.
+      - name: Tests
+        run: uv run pytest -m "not decklink_hardware" --cov=scoresight --cov-branch --cov-report=term-missing
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Web-Tests
+        run: node --test tests/web/

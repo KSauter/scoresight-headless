@@ -24,12 +24,18 @@ permissions:
   contents: read
 
 jobs:
+  tests:
+    uses: ./.github/workflows/tests.yaml
+    permissions:
+      contents: read
+
   build:
+    needs: tests
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python-version }}
 
@@ -64,13 +70,13 @@ jobs:
           path: scoresight-service.iss
           options: /O+
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: scoresight-service-windows-py${{ inputs.python-version }}
           path: dist/scoresight-service
           retention-days: 90
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: scoresight-service-setup
           path: dist/scoresight-service-setup.exe
