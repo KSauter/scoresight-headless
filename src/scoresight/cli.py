@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import threading
-import webbrowser
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,21 +22,13 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--log-level", default="info", choices=["debug", "info", "warning", "error"]
     )
-    result.add_argument(
-        "--open-browser",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="open the signed-in dashboard on startup (default: enabled)",
-    )
     return result
 
 
 def _announce(
     store: ConfigStore, deployment: DeploymentSettings, host: str, port: int
-) -> str | None:
+) -> None:
     """Report where the service lives and how to sign in.
-
-    Returns the self-signing URL, or None when local tokens are not in use.
 
     Without this the first run is a dead end: the configuration is created
     under a platform-specific directory the operator has no reason to guess,
@@ -57,17 +47,25 @@ def _announce(
     if host in {"0.0.0.0", "::"}:
         logger.info("Listening on %s: reachable from other machines", host)
 
+    if deployment.auth_mode == "none":
+        logger.warning(
+            "Authentication is disabled: everyone who can reach %s:%d has full "
+            "control, including the ability to point outputs at any URL",
+            display_host,
+            port,
+        )
+        return
     if deployment.auth_mode != "token":
-        return None
+        return
 
     token = store.load().security.admin_token
     logger.info("Administrator token: %s", token)
     # Selecting text out of a double-clicked console window requires QuickEdit
     # to be enabled first, so the token is also offered as a link that signs in
     # on its own. Log redaction strips the query string from access logs.
-    sign_in_url = f"http://{display_host}:{port}/login?token={token}"
-    logger.info("Sign in directly: %s", sign_in_url)
-    return sign_in_url
+    logger.info(
+        "Sign in directly: http://%s:%d/login?token=%s", display_host, port, token
+    )
 
 
 def main() -> None:
@@ -77,11 +75,7 @@ def main() -> None:
         deployment = replace(deployment, data_dir=args.data_dir)
     configure_logging(args.log_level, json_logs=deployment.json_logs)
     app = create_app(args.config, deployment=deployment)
-    sign_in_url = _announce(app.state.config_store, deployment, args.host, args.port)
-    if sign_in_url and args.open_browser:
-        # uvicorn.run blocks, so the browser is opened from a timer. The delay
-        # covers startup; an early request would just fail to connect.
-        threading.Timer(1.5, webbrowser.open, args=(sign_in_url,)).start()
+    _announce(app.state.config_store, deployment, args.host, args.port)
     uvicorn.run(
         app,
         host=args.host,

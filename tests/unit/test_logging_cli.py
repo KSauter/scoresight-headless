@@ -54,9 +54,13 @@ def test_cli_uses_single_worker_deployment_settings(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(cli, "configure_logging", lambda *args, **kwargs: None)
     # main() reads the store off the application to report the access details,
     # so the stand-in needs that attribute.
-    app = SimpleNamespace(state=SimpleNamespace(config_store=ConfigStore(tmp_path / "config.json")))
+    app = SimpleNamespace(
+        state=SimpleNamespace(config_store=ConfigStore(tmp_path / "config.json"))
+    )
     monkeypatch.setattr(cli, "create_app", lambda *args, **kwargs: app)
-    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(
+        cli.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs)
+    )
     monkeypatch.setattr(
         sys,
         "argv",
