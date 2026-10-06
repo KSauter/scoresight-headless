@@ -126,6 +126,35 @@ def test_preview_websocket_starts_with_latest_frame(tmp_path) -> None:
     assert app.state.service.preview_frames.subscriber_count == 0
 
 
+def test_preview_ack_skips_backlog_and_releases_subscription(tmp_path) -> None:
+    app, token = make_client(tmp_path)
+    service = app.state.service
+    service.latest_preview = PreviewFrame(
+        jpeg=b"first", width=640, height=360, sequence=1
+    )
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            f"/api/v1/preview?token={token}&flow_control=ack"
+        ) as websocket:
+            assert websocket.receive_json()["sequence"] == 1
+            assert websocket.receive_bytes() == b"first"
+            for sequence in range(2, 102):
+                client.portal.call(
+                    service.publish_preview,
+                    PreviewFrame(
+                        jpeg=str(sequence).encode(),
+                        width=640,
+                        height=360,
+                        sequence=sequence,
+                    ),
+                )
+            websocket.send_text("next")
+            assert websocket.receive_json()["sequence"] == 101
+            assert websocket.receive_bytes() == b"101"
+        assert service.preview_frames.subscriber_count == 0
+        assert app.state.websocket_counts["preview"] == 0
+
+
 def test_filtered_region_preview_requires_auth_and_returns_png(tmp_path) -> None:
     app, token = make_client(tmp_path)
     app.state.service.latest_region_previews["clock"] = b"\x89PNG\r\n\x1a\npreview"

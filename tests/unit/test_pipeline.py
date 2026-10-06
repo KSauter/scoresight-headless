@@ -524,3 +524,97 @@ def test_occupied_region_survives_the_blank_check() -> None:
 
     result = preprocess(patch, PreprocessConfig())
     assert result.max() == 255, "digits must still come through"
+
+
+def clock_results(values, *, confirmations=2, smoothing=1, interval=0.1):
+    region = RegionConfig(
+        id="clock",
+        name="Clock",
+        rect=NormalizedRect(x=0, y=0, width=1, height=1),
+        field_type="time",
+        confirmation_frames=confirmations,
+        smoothing_window=smoothing,
+    )
+    pipeline = RecognitionPipeline(
+        FakeEngine([Recognition(value, 0.99) for value in values]), [region]
+    )
+    results = []
+    for index in range(len(values)):
+        packet = frame(index)
+        packet.monotonic_ns = int((1 + index * interval) * 1_000_000_000)
+        results.append(pipeline.process(packet).fields[0])
+    return results
+
+
+@pytest.mark.parametrize("smoothing", [1, 5, 15])
+def test_moving_tenths_confirm_without_repeated_text(smoothing):
+    values = ["01:00", "59.9", "59.8", "59.7", "59.6", "59.5"]
+    results = clock_results(values, smoothing=smoothing)
+    assert [result.value for result in results] == [
+        "",
+        "59.9",
+        "59.9",
+        "59.7",
+        "59.7",
+        "59.5",
+    ]
+    assert [result.candidate_value for result in results] == values
+
+
+def test_clock_does_not_invent_digits_at_rollover():
+    values = ["10:00", "10:00", "09:59", "09:59"]
+    results = clock_results(values, smoothing=5)
+    assert [result.candidate_value for result in results] == values
+    assert results[-1].value == "09:59"
+
+
+@pytest.mark.parametrize("confirmations", [1, 2])
+def test_clock_holds_through_bad_bursts_but_allows_confirmed_reset(confirmations):
+    values = [
+        "12:34",
+        "12:34",
+        "72:34",
+        "72:34",
+        "12:34",
+        "12:33",
+        "12:33",
+        "20:00",
+        "20:00",
+        "20:00",
+    ]
+    results = clock_results(values, confirmations=confirmations)
+    assert results[2].value == results[3].value == "12:34"
+    assert results[6].value == "12:33"
+    assert results[7].value == results[8].value == "12:33"
+    assert results[9].value == "20:00"
+
+
+def test_clock_accounts_for_elapsed_capture_time_and_pauses():
+    results = clock_results(["01:00", "01:00", "00:55", "00:50"], interval=5)
+    assert results[-1].value == "00:50"
+    paused = clock_results(["9.8"] * 30 + ["9.7", "9.6"])
+    assert paused[-1].value == "9.6"
+
+
+def test_bad_reads_do_not_contaminate_smoothing_history():
+    region = RegionConfig(
+        name="Score",
+        rect=NormalizedRect(x=0, y=0, width=1, height=1),
+        field_type="number",
+        confirmation_frames=1,
+        smoothing_window=5,
+    )
+    pipeline = RecognitionPipeline(
+        FakeEngine(
+            [
+                Recognition("12", 0.99),
+                Recognition("99", 0.1),
+                Recognition("99", 0.1),
+                Recognition("12", 0.99),
+            ]
+        ),
+        [region],
+    )
+    results = [pipeline.process(frame(i)).fields[0] for i in range(4)]
+    assert [result.value for result in results] == ["12"] * 4
+    assert results[-1].candidate_value == "12"
