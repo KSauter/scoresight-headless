@@ -1,3 +1,5 @@
 """ScoreSight service package."""
 
-__version__ = "0.9.0"
+from scoresight._version import __version__
+
+__all__ = ["__version__"]

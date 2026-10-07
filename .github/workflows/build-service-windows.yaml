@@ -32,8 +32,18 @@ jobs:
   build:
     needs: tests
     runs-on: windows-latest
+    env:
+      SCORESIGHT_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v7
+
+      # Die Version steht nirgends im Repo; Paket und Installer bekommen sie aus
+      # SCORESIGHT_VERSION, src/scoresight/_version.py ist nur der Platzhalter.
+      - name: Version eintragen
+        shell: pwsh
+        run: |
+          Set-Content -Path src/scoresight/_version.py -Encoding ASCII `
+            -Value "__version__ = `"$env:SCORESIGHT_VERSION`""
 
       - uses: actions/setup-python@v7
         with:
@@ -61,7 +71,7 @@ jobs:
         shell: pwsh
         run: |
           (Get-Content -Path scoresight-service.iss -Raw) `
-            -replace '@SCORESIGHT_VERSION@', '${{ inputs.version }}' `
+            -replace '@SCORESIGHT_VERSION@', $env:SCORESIGHT_VERSION `
             | Out-File -FilePath scoresight-service.iss -Encoding ASCII
 
       - name: Installer kompilieren

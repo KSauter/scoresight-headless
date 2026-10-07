@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scoresight"
-version = "0.9.0"
+dynamic = ["version"]
 description = "Real-time scoreboard OCR service and web operator interface"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -52,6 +52,10 @@ scoresight-service = "scoresight.cli:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
+
+# The release workflow writes SCORESIGHT_VERSION into src/scoresight/_version.py.
+[tool.setuptools.dynamic]
+version = {attr = "scoresight._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

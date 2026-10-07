@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from scoresight import __version__
 from scoresight.capture.decklink import DeckLinkCapture, DeckLinkUnavailable
 from scoresight.capture.mock import MockCapture
 from scoresight.capture.ndi import NDICapture, NDIUnavailable
@@ -131,7 +132,7 @@ def create_app(
         if access_verifier is not None:
             await access_verifier.close()
 
-    app = FastAPI(title="ScoreSight", version="0.9.0", lifespan=lifespan)
+    app = FastAPI(title="ScoreSight", version=__version__, lifespan=lifespan)
     app.state.service = service
     app.state.config_store = store
     app.state.profile_store = profiles
