@@ -553,6 +553,7 @@ function updateRegionEditor() {
   byId('region-confirmation').value = region.confirmation_frames || 2;
   byId('region-smoothing').value = region.smoothing_window;
   byId('region-smoothing').disabled = region.field_type === 'time';
+  byId('region-min-contrast').value = region.preprocess.min_contrast;
   byId('region-threshold').value = region.preprocess.threshold_method;
   byId('region-dilate').value = region.preprocess.dilate_iterations;
   byId('region-vscale').value = region.preprocess.vertical_scale;
@@ -572,6 +573,7 @@ function collectRegion() {
   region.confidence_threshold = Number(byId('region-confidence').value);
   region.confirmation_frames = Number(byId('region-confirmation').value);
   region.smoothing_window = Number(byId('region-smoothing').value);
+  region.preprocess.min_contrast = Number(byId('region-min-contrast').value);
   region.preprocess.threshold_method = byId('region-threshold').value;
   region.preprocess.dilate_iterations = Number(byId('region-dilate').value);
   region.preprocess.vertical_scale = Number(byId('region-vscale').value);

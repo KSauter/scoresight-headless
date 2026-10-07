@@ -91,7 +91,7 @@
             </div>
             <div class="two-column">
               <label>Smoothing<input id="region-smoothing" type="number" min="1" max="15"></label>
-              <span></span>
+              <label>Min contrast<input id="region-min-contrast" type="number" min="0" max="255" step="1"></label>
             </div>
             <label>Threshold
               <select id="region-threshold">
@@ -109,7 +109,7 @@
               <label><input id="region-leading" type="checkbox"> Remove leading zeros</label>
               <label><input id="region-autocrop" type="checkbox"> Auto-crop</label>
             </div>
-            <p class="hint">Clock accepts mm:ss and seconds with tenths below one minute (59.9). Custom regex must allow both formats. Clock confirmation follows changing readings and tolerates unreadable frames; large jumps need consistent readings for at least 1.5 seconds. Character smoothing applies only to number and text fields. Save to apply changes.</p>
+            <p class="hint">Clock accepts mm:ss and seconds with tenths below one minute (59.9). Custom regex must allow both formats. Clock confirmation follows changing readings and tolerates unreadable frames; large jumps need consistent readings for at least 1.5 seconds. Character smoothing applies only to number and text fields. Min contrast: a cell whose brightness spread stays below it counts as empty and is never sent to OCR (0 disables). Save to apply changes.</p>
             <div class="filter-preview-card">
               <div class="panel-heading">
                 <strong>OCR filter preview</strong>
