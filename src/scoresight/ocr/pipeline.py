@@ -109,11 +109,15 @@ class RecognitionPipeline:
                 recognitions[index] = answer
 
         for region, recognition in zip(enabled_regions, recognitions, strict=True):
-            value = self._normalize_candidate(recognition.text, region.field_type)
+            clock = self._clocks.get(region.id)
+            value = self._normalize_candidate(
+                recognition.text,
+                region.field_type,
+                tenths=clock is not None and clock.tenths,
+            )
             if region.remove_leading_zeros and value.isdigit():
                 value = value.lstrip("0") or "0"
             smoother = self._smoothers.get(region.id)
-            clock = self._clocks.get(region.id)
             valid = not value or (
                 (
                     recognition.confidence is None
@@ -146,7 +150,7 @@ class RecognitionPipeline:
             ):
                 state = ResultState.REJECTED
                 if clock is not None:
-                    clock.reset_pending()
+                    clock.reject()
             elif clock is not None and candidate_value:
                 self._pending_values.pop(region.id, None)
                 unchanged = self._last_values.get(region.id) == candidate_value
@@ -219,7 +223,14 @@ class RecognitionPipeline:
         self.engine.close()
 
     @staticmethod
-    def _normalize_candidate(value: str, field_type: str) -> str:
+    def _normalize_candidate(
+        value: str, field_type: str, *, tenths: bool = False
+    ) -> str:
+        """Spell the engine's text the way the clock means it.
+
+        ``tenths`` says the clock is known to be below a minute, which settles
+        readings that are ambiguous on their own.
+        """
         value = value.strip()
         if field_type == "time":
             value = re.sub(r"\s+", "", value).replace(",", ".")
@@ -234,6 +245,18 @@ class RecognitionPipeline:
             # "MM:S" - below a minute the board switches to "SS.t", and the
             # engine frequently reads that dot as a colon ("58:7").
             value = re.sub(r"^(\d{1,2})[:.](\d)$", r"\1.\2", value)
+            if tenths:
+                # Below a minute this kind of board shows "SS:t", and the
+                # engine loses that colon on some tenths: "21.0" arrives as
+                # "210". The rule below would make that "2:10" - a jump of two
+                # minutes on a clock that stood at 21 seconds a frame ago.
+                if re.fullmatch(r"\d{2,3}", value):
+                    value = f"{value[:-1]}.{value[-1]}"
+                # The expired board shows "0:0"; the engine pads it to "0:00"
+                # every few frames. Same instant, so keep the clock's spelling
+                # rather than flipping between the two.
+                elif re.fullmatch(r"0{1,2}:0{1,2}", value):
+                    value = "0.0"
             if value.isdigit() and 3 <= len(value) <= 4:
                 value = f"{value[:-2]}:{value[-2:]}"
         elif field_type == "number":

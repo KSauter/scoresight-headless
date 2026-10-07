@@ -17,6 +17,7 @@ from scoresight.core.models import (
 from scoresight.ocr.base import Recognition
 from scoresight.ocr.pipeline import RecognitionPipeline
 from scoresight.ocr.preprocess import is_blank, preprocess, transform_frame
+from scoresight.ocr.smoothing import ClockTracker
 
 
 class FakeEngine:
@@ -276,6 +277,41 @@ def test_crop_after_perspective_uses_rectified_dimensions() -> None:
 
 def test_pipeline_requires_consecutive_confirmations() -> None:
     region = RegionConfig(
+        id="score",
+        name="Score",
+        rect=NormalizedRect(x=0, y=0, width=0.5, height=0.5),
+        field_type="number",
+        confirmation_frames=2,
+    )
+    engine = FakeEngine(
+        [
+            Recognition("12", 0.99),
+            Recognition("junk", 0.99),
+            Recognition("12", 0.99),
+            Recognition("12", 0.99),
+        ]
+    )
+    pipeline = RecognitionPipeline(engine, [region])
+
+    first = pipeline.process(frame(1)).fields[0]
+    rejected = pipeline.process(frame(2)).fields[0]
+    restarted = pipeline.process(frame(3)).fields[0]
+    accepted = pipeline.process(frame(4)).fields[0]
+
+    assert first.state == ResultState.PENDING
+    assert first.value == ""
+    assert rejected.state == ResultState.REJECTED
+    assert restarted.state == ResultState.PENDING
+    assert accepted.state == ResultState.OK
+    assert accepted.value == "12"
+
+
+def test_unreadable_frame_does_not_restart_clock_confirmation() -> None:
+    """A frame the engine cannot read says nothing about the clock. Below a
+    minute such frames come every second; restarting on each would keep a
+    correction pending indefinitely.
+    """
+    region = RegionConfig(
         id="clock",
         name="Clock",
         rect=NormalizedRect(x=0, y=0, width=0.5, height=0.5),
@@ -287,21 +323,17 @@ def test_pipeline_requires_consecutive_confirmations() -> None:
             Recognition("12.34", 0.99),
             Recognition("junk", 0.99),
             Recognition("1234", 0.99),
-            Recognition("12:34", 0.99),
         ]
     )
     pipeline = RecognitionPipeline(engine, [region])
 
     first = pipeline.process(frame(1)).fields[0]
     rejected = pipeline.process(frame(2)).fields[0]
-    restarted = pipeline.process(frame(3)).fields[0]
-    accepted = pipeline.process(frame(4)).fields[0]
+    accepted = pipeline.process(frame(3)).fields[0]
 
     assert first.state == ResultState.PENDING
     assert first.candidate_value == "12:34"
-    assert first.value == ""
     assert rejected.state == ResultState.REJECTED
-    assert restarted.state == ResultState.PENDING
     assert accepted.state == ResultState.OK
     assert accepted.value == "12:34"
 
@@ -351,8 +383,16 @@ def test_clock_switches_between_minutes_and_tenths(smoothing_window: int) -> Non
         [region],
     )
 
+    # Half a second per frame: the jumps in this sequence are resets, and a
+    # reset needs to stay on the board for a while before it is believed.
+    sequence = 0
     for value in values:
-        results = [pipeline.process(frame()).fields[0] for _ in range(4)]
+        results = []
+        for _ in range(4):
+            packet = frame(sequence)
+            packet.monotonic_ns = int(sequence * 500_000_000)
+            sequence += 1
+            results.append(pipeline.process(packet).fields[0])
         assert all(result.state != ResultState.REJECTED for result in results)
         assert results[-1].value == value
 
@@ -570,23 +610,136 @@ def test_clock_does_not_invent_digits_at_rollover():
 
 @pytest.mark.parametrize("confirmations", [1, 2])
 def test_clock_holds_through_bad_bursts_but_allows_confirmed_reset(confirmations):
-    values = [
-        "12:34",
-        "12:34",
-        "72:34",
-        "72:34",
-        "12:34",
-        "12:33",
-        "12:33",
-        "20:00",
-        "20:00",
-        "20:00",
-    ]
+    values = ["12:34", "12:34", "72:34", "72:34", "12:34", "12:33", "12:33"]
+    values += ["20:00"] * 16
     results = clock_results(values, confirmations=confirmations)
     assert results[2].value == results[3].value == "12:34"
     assert results[6].value == "12:33"
-    assert results[7].value == results[8].value == "12:33"
-    assert results[9].value == "20:00"
+    # A reset stays on the board for seconds; three frames are not enough to
+    # tell it from misreads that happen to agree with each other.
+    assert {result.value for result in results[7:10]} == {"12:33"}
+    assert results[-2].value == "12:33"
+    assert results[-1].value == "20:00"
+
+
+def test_clock_tracker_needs_time_not_frames_for_a_jump() -> None:
+    """Below a minute the board's colon blinks, so "21.2", "21.1", "21.0" can
+    arrive as "212", "211", "210" - which spell a consistent clock at 2:12.
+    """
+    tracker = ClockTracker(2)
+    assert tracker.add("21.5", 10.0, unchanged=False) is False
+    assert tracker.add("21.4", 10.1, unchanged=False) is True
+    misreads = [("2:12", 10.2), ("2:11", 10.3), ("2:10", 10.4)]
+    assert [tracker.add(v, t, unchanged=False) for v, t in misreads] == [False] * 3
+    # Back on the trajectory: the misread run is dropped after two tolerated
+    # strays, then the usual confirmation applies.
+    recovery = [("20.9", 10.5), ("20.8", 10.6), ("20.7", 10.7), ("20.6", 10.8)]
+    assert [tracker.add(v, t, unchanged=False) for v, t in recovery] == [
+        False,
+        False,
+        False,
+        True,
+    ]
+    # A reset that stays on the board is accepted once it spans reset_seconds.
+    reset = [tracker.add("20:00", 11.0 + i * 0.1, unchanged=False) for i in range(16)]
+    assert reset == [False] * 15 + [True]
+
+
+def test_clock_correction_survives_unreadable_and_stray_frames() -> None:
+    """Below a minute every second brings frames the engine cannot read and
+    one it misreads. If those restarted the confirmation of a correction, a
+    wrong value, once accepted, would stand for the rest of the period.
+    """
+    tracker = ClockTracker(2)
+    tracker.add("35.9", -0.1, unchanged=False)
+    tracker.add("35.8", 0.0, unchanged=False)  # accepted; the board shows 26.8
+    readings: list[tuple[str, float] | None] = [
+        ("26.7", 0.1),
+        ("26.6", 0.2),
+        None,
+        None,
+        ("26.2", 0.5),
+        ("26.8", 0.6),
+        ("25.9", 0.7),
+        ("25.8", 0.8),
+        None,
+        ("25.5", 1.0),
+        ("25.4", 1.1),
+        None,
+        ("25.8", 1.3),
+        ("25.1", 1.4),
+        ("25.0", 1.5),
+        ("24.9", 1.6),
+    ]
+    outcome = []
+    for item in readings:
+        if item is None:
+            tracker.reject()
+        else:
+            outcome.append(tracker.add(item[0], item[1], unchanged=False))
+    assert outcome == [False] * (len(outcome) - 1) + [True]
+
+
+def test_single_repeat_of_accepted_text_does_not_reanchor_the_clock() -> None:
+    """A stray frame can repeat the accepted text ("358" for a board at 35:3).
+    Anchoring on it would turn the next correct reading into a jump that
+    needs seconds to be believed; a real pause shows itself again anyway.
+    """
+    tracker = ClockTracker(2)
+    assert tracker.add("35.9", 0.0, unchanged=False) is False
+    assert tracker.add("35.8", 0.1, unchanged=False) is True
+    assert tracker.add("35.7", 0.2, unchanged=False) is False
+    tracker.reject()
+    tracker.reject()
+    assert tracker.add("35.8", 0.5, unchanged=True) is True
+    assert tracker.accepted == (35.8, 0.1, 0.1)
+    assert tracker.add("35.3", 0.6, unchanged=False) is True
+    # A pause re-anchors once it has shown itself twice.
+    assert tracker.add("35.3", 0.7, unchanged=True) is True
+    assert tracker.accepted == (35.3, 0.6, 0.1)
+    assert tracker.add("35.3", 0.8, unchanged=True) is True
+    assert tracker.accepted == (35.3, 0.8, 0.1)
+
+
+def test_repeat_of_accepted_text_never_outranks_an_established_trajectory() -> None:
+    tracker = ClockTracker(4)
+    for value, timestamp in [("36.0", 0.0), ("35.9", 0.1), ("35.8", 0.2), ("35.7", 0.3)]:
+        confirmed = tracker.add(value, timestamp, unchanged=False)
+    assert confirmed is True
+    assert tracker.add("35.6", 0.4, unchanged=False) is False
+    assert tracker.add("35.5", 0.5, unchanged=False) is False
+    assert tracker.add("35.4", 0.6, unchanged=False) is False
+    assert tracker.add("35.7", 0.7, unchanged=True) is True
+    assert tracker.add("35.7", 0.8, unchanged=True) is True
+    assert tracker.accepted == (35.7, 0.3, 0.1)
+    assert tracker.add("35.2", 0.9, unchanged=False) is True
+
+
+def test_dropped_colon_below_a_minute_reads_as_tenths() -> None:
+    """This board shows "SS:t" below a minute and its colon blinks, so "21.0"
+    arrives as "210" now and then - "2:10" to the rule for minutes.
+    """
+    values = ["21.5", "21.5", "21.4", "21.3", "212", "211", "210"]
+    results = clock_results(values)
+    assert [r.candidate_value for r in results[4:]] == ["21.2", "21.1", "21.0"]
+    assert results[-1].value == "21.1"
+    assert all(":" not in r.value for r in results)
+    normalize = RecognitionPipeline._normalize_candidate
+    # The same digits are minutes and seconds while the clock is above a minute.
+    assert normalize("210", "time") == "2:10"
+    assert normalize("210", "time", tenths=True) == "21.0"
+    assert normalize("53", "time", tenths=True) == "5.3"
+
+
+def test_expired_clock_keeps_one_spelling() -> None:
+    """The expired board shows "0:0"; the engine reads it as "0:.0", "0:0" or
+    "0:00" in turn. Those are one instant and must not flip the output.
+    """
+    values = ["0.2", "0.2", "0.1", "0:0", "0:00", "0:.0", "0:00"]
+    results = clock_results(values)
+    assert [r.candidate_value for r in results[3:]] == ["0.0"] * 4
+    assert [r.value for r in results] == ["", "0.2", "0.2", "0.0", "0.0", "0.0", "0.0"]
+    assert RecognitionPipeline._normalize_candidate("0:00", "time") == "0:00"
 
 
 def test_clock_accounts_for_elapsed_capture_time_and_pauses():

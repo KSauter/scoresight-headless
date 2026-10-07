@@ -79,9 +79,10 @@ consecutive matching candidates are required before a new value becomes accepted
 For clock fields, confirmation follows whole readings that agree with the elapsed
 capture time, so moving tenths can confirm without repeating identical text.
 Clock fields bypass character smoothing, which can invent times at digit rollovers.
-Large jumps require at least three consistent readings, allowing clock resets while
-holding the last accepted time through short OCR glitches. Paused and count-up
-clocks are supported too; this does not extrapolate times when OCR is missing.
+Large jumps require consistent readings over at least 1.5 seconds (and at least three
+frames), allowing clock resets while holding the last accepted time through short OCR
+glitches. Paused and count-up clocks are supported too; this does not extrapolate times
+when OCR is missing.
 Clock fields support both `mm:ss` and seconds with tenths below one minute, such as
 `01:00` → `59.9` → `09.9` → `0.0`, preserving the decimal point in the output.
 Any custom regular expression must allow both formats (or use the default `^.*$`).
