@@ -131,7 +131,7 @@ def create_app(
         if access_verifier is not None:
             await access_verifier.close()
 
-    app = FastAPI(title="ScoreSight", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="ScoreSight", version="0.9.0", lifespan=lifespan)
     app.state.service = service
     app.state.config_store = store
     app.state.profile_store = profiles
