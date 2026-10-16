@@ -124,3 +124,50 @@ scores here never left `0`), other penalty numbers, a different camera
 position. Extract and label each recording into its own corpus directory,
 pass all label files to `build_gt.py` and train again - the labels of earlier
 recordings stay valid.
+
+## Labelling a whole game without trusting the engine
+
+Steps 2 and 3 take the engine's reading as a starting point. On a full game
+that is not safe: the model being replaced misread whole stretches the same
+way every time - `1:59 ... 1:00` as `7:59 ... 7:00`, `14:30` as `19:30`, a lone
+score `1` as `11` - and a consistent misreading is a perfect countdown. The
+second recording (`nautronic2`) was therefore labelled from pixels only:
+
+```bash
+C=output/training-nautronic/corpus2
+# 1. every region with context for jitter, in parallel chunks if the video is long
+python scripts/training/extract_regions.py game.mp4 config.json --step 15 --pad 6 --out $C/cells
+# the period ends at full frame rate, for the tenths
+python scripts/training/extract_regions.py game.mp4 config.json --regions time --step 1 --pad 6 \
+    --start 900 --end 995 --out $C/tenths/t0
+
+# 2. clock: group every digit cell by pixels, look at the sheets, name each group
+python scripts/training/cluster_cells.py config.json $C/cells/time.jsonl $C/tenths/*/time.jsonl \
+    --work $C/clusters --threshold 0.03 --sheet
+#    write $C/clusters/time_labels.json: {"<cell>": {"<group>": "<char>", ...}}, " " dark, "?" drop
+python scripts/training/cluster_cells.py config.json $C/cells/time.jsonl $C/tenths/*/time.jsonl \
+    --work $C/clusters --centers $C/clusters/time_centers.npz \
+    --labels $C/clusters/time_labels.json --out $C/clusters/time_all.jsonl
+#    the timeline then has to agree with the group reading, per-cell templates check both
+python scripts/training/label_game_clock.py config.json --inputs $C/clusters/time_all.jsonl \
+    --out $C/labels_time.jsonl --sheet $C/clock_templates.png --trust-reading
+#    penalty clocks the same way with --region <id> --cells 3 --max-minutes 10 --group-prefix pen
+
+# 3. scores, period, penalty numbers: segments of identical pixels, one look per segment
+python scripts/training/segment_cells.py config.json $C/cells \
+    --regions homeScore,awayScore,period,homePenNr1 --out $C/segments --threshold 0.02
+#    write the text per segment into $C/ranges.json, then label_cells.py --ranges as in step 3
+
+# 4. ground truth with shifted copies, so frame lines around the cells are not learnt
+python scripts/training/build_gt.py config.json --labels <all label files> --out gt2 \
+    --holdout ... --jitter 3 --jitter-copies 2 --cap tenths=12
+```
+
+Look at `clock_templates.png` and a sample of the training images before
+training: a template that shows a different digit than its name means
+mislabelled stretches. `eval_models.py gt2 holdout_jitter` measures how well
+a model copes with a camera a few pixels off.
+
+On the held-out stretches of both recordings `nautronic2` reads 99.8 % of the
+crops exactly (99.5 % with shifted regions), against 82.1 % (79.3 %) for
+`nautronic` and 61.5 % (55.0 %) for `scoreboard_general`.

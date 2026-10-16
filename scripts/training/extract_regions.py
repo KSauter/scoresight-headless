@@ -52,6 +52,19 @@ def colon_pair(binary: np.ndarray) -> bool:
     return False
 
 
+def padded_crop(image, bounds, pad: int):
+    """The crop with ``pad`` pixels of context, or None at the frame border.
+
+    build_gt.py recovers the original crop as the centre of this image, which
+    only works when the context is the same on every side.
+    """
+    x1, y1, x2, y2 = bounds
+    height, width = image.shape[:2]
+    if x1 - pad < 0 or y1 - pad < 0 or x2 + pad > width or y2 + pad > height:
+        return None
+    return image[y1 - pad : y2 + pad, x1 - pad : x2 + pad]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("video", type=Path)
@@ -70,6 +83,13 @@ def main() -> int:
     parser.add_argument(
         "--keep-blank", action="store_true", help="also write blank cells"
     )
+    parser.add_argument(
+        "--pad",
+        type=int,
+        default=0,
+        help="also write each crop with this many pixels of context on every side "
+        "to <region>/padded/, so build_gt.py --jitter can shift the region",
+    )
     args = parser.parse_args()
 
     config = ServiceConfig.model_validate_json(args.config.read_text(encoding="utf-8"))
@@ -84,6 +104,8 @@ def main() -> int:
         indexes = {}
         for region in regions:
             (args.out / region.id).mkdir(parents=True, exist_ok=True)
+            if args.pad:
+                (args.out / region.id / "padded").mkdir(exist_ok=True)
             indexes[region.id] = stack.enter_context(
                 open(args.out / f"{region.id}.jsonl", "a", encoding="utf-8")
             )
@@ -110,7 +132,8 @@ def extract(args, config, regions, engine, indexes) -> int:
             break
         frame_height, frame_width = image.shape[:2]
         for region in regions:
-            patch = crop_region(image, region.rect.pixels(frame_width, frame_height))
+            bounds = region.rect.pixels(frame_width, frame_height)
+            patch = crop_region(image, bounds)
             gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
             blank = is_blank(gray, region.preprocess)
             if blank and not args.keep_blank:
@@ -131,6 +154,11 @@ def extract(args, config, regions, engine, indexes) -> int:
                 record["raw"] = reading.text
                 record["conf"] = round(reading.confidence, 2)
             cv2.imwrite(str(args.out / record["file"]), patch)
+            if args.pad:
+                padded = padded_crop(image, bounds, args.pad)
+                if padded is not None:
+                    name = Path(record["file"]).name
+                    cv2.imwrite(str(args.out / region.id / "padded" / name), padded)
             indexes[region.id].write(json.dumps(record) + "\n")
             written += 1
     return written
