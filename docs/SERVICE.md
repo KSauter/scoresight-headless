@@ -60,6 +60,8 @@ components the service stays available and reports capture health as degraded.
 - `/api/v1/config`, `/sources`, `/profiles`, and `/outputs` support the operator UI.
 - `/preview/default?token=...` is the transparent HTML scoreboard view.
 - `/metrics` exposes Prometheus text metrics.
+- `GET /api/v1/regions/{id}/cells?count=N` proposes `N` digit cells for a saved
+  region from what it showed over the last minutes (see below).
 
 Configuration writes use revisions. A stale write returns HTTP 409 rather than
 silently overwriting a newer operator change.
@@ -91,6 +93,28 @@ and the stable last accepted value.
 The dashboard keeps one filtered-image request in flight, releases decoded images
 after drawing, and pauses its live connections while hidden. Returning to the tab
 reconnects to the latest state; background OCR and outputs continue on the service.
+
+### Digit cell engine
+
+Under `Recognition`, `Engine` switches between Tesseract and `Digit cells (neural
+network)` (`"engine": "cnn"` under `ocr`). The cell engine classifies every digit cell of
+a region on its own - a digit, a dark cell, or a digit caught while changing, which is
+rejected instead of guessed - so a lone `1` cannot become `11`. It loads
+`<model>.cells.onnx` and `<model>.cells.json` from the same directory as the Tesseract
+models and runs on OpenCV, no GPU needed. Regions without cells stay with Tesseract,
+so `model` must name both.
+
+Cells are proposed, not drawn: save the region, let the board run for a minute, select
+the region, set `Digit cells` (4 for a clock `MM:SS`, 3 for a penalty clock `M:SS`, 2 for
+a score, 1 for a period) and press `Detect cells`. Dark cells cannot be seen, so the
+proposal places cells that never lit by the spacing of those that did and draws them
+dashed; a lone `1` gets a full digit width. Drag a cell edge to adjust, then save. A
+region that has never shown anything lit returns no proposal yet.
+
+Below a minute a four-cell clock shows `SS:t` with the last cell dark; the engine reports
+that as `27.5`. A clock counts in one direction: once its direction is known, a reading
+against it - a changing digit whose old and new segments together look like a 9 - needs
+the same 1.5 seconds as any other jump before it is believed.
 
 ## Live fan-site WebSocket output
 

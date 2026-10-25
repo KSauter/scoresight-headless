@@ -70,6 +70,13 @@
             <label>Workers<input id="ocr-workers" type="number" min="1" max="4" step="1"></label>
           </div>
           <label>Model<input id="ocr-model" autocomplete="off"></label>
+          <label>Engine
+            <select id="ocr-engine">
+              <option value="tesseract">Tesseract</option>
+              <option value="cnn">Digit cells (neural network)</option>
+            </select>
+          </label>
+          <p class="hint">With digit cells, regions that have cells are read cell by cell; regions without cells stay with Tesseract.</p>
         </section>
 
         <section class="panel" id="region-editor">
@@ -104,6 +111,12 @@
               <label>Dilate<input id="region-dilate" type="number" min="0" max="10" step="1"></label>
               <label>Vertical scale<input id="region-vscale" type="number" min="0.1" max="3" step="0.1"></label>
             </div>
+            <div class="cell-controls">
+              <label>Digit cells<input id="region-cell-count" type="number" min="1" max="8" step="1"></label>
+              <button type="button" id="detect-cells">Detect cells</button>
+              <button type="button" id="clear-cells">Clear</button>
+            </div>
+            <p class="hint" id="region-cells-state"></p>
             <div class="checks">
               <label><input id="region-invert" type="checkbox"> Invert</label>
               <label><input id="region-leading" type="checkbox"> Remove leading zeros</label>

@@ -4,6 +4,7 @@ import re
 import time
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from scoresight.capture.base import FramePacket
 from scoresight.core.models import (
@@ -15,6 +16,7 @@ from scoresight.core.models import (
     ResultState,
 )
 from scoresight.ocr.base import OcrEngine, Recognition
+from scoresight.ocr.cells import UNREADABLE, CellActivity
 from scoresight.ocr.preprocess import (
     crop_region,
     is_blank,
@@ -32,6 +34,7 @@ class RecognitionPipeline:
         *,
         crop: NormalizedRect | None = None,
         perspective: list[Point] | None = None,
+        cell_activity: dict[str, CellActivity] | None = None,
     ) -> None:
         self.engine = engine
         self.regions = regions
@@ -48,6 +51,11 @@ class RecognitionPipeline:
             for region in regions
             if region.smoothing_window > 1 and region.field_type != "time"
         }
+        # Which pixels of each region lit up recently, for finding digit cells.
+        # Kept by the caller across pipeline rebuilds, e.g. capture reconnects.
+        self.cell_activity: dict[str, CellActivity] = (
+            cell_activity if cell_activity is not None else {}
+        )
         self._clocks = {
             region.id: ClockTracker(region.confirmation_frames)
             for region in regions
@@ -95,8 +103,20 @@ class RecognitionPipeline:
         blank = Recognition("", 0.0)
         recognitions: list[Recognition] = [blank] * len(prepared)
 
+        for index in recognisable:
+            self._observe_cells(enabled_regions[index], patches[index])
+
         if recognisable:
-            requests = [(prepared[i], enabled_regions[i].id) for i in recognisable]
+            # An engine that reads digit cells wants the grey levels, not the
+            # binarised image prepared for Tesseract.
+            raw_regions: set[str] = getattr(self.engine, "raw_regions", set())
+            requests = [
+                (
+                    patches[i] if enabled_regions[i].id in raw_regions else prepared[i],
+                    enabled_regions[i].id,
+                )
+                for i in recognisable
+            ]
             recognize_many = getattr(self.engine, "recognize_many", None)
             if callable(recognize_many):
                 answers = recognize_many(requests)
@@ -118,13 +138,17 @@ class RecognitionPipeline:
             if region.remove_leading_zeros and value.isdigit():
                 value = value.lstrip("0") or "0"
             smoother = self._smoothers.get(region.id)
-            valid = not value or (
-                (
-                    recognition.confidence is None
-                    or recognition.confidence >= region.confidence_threshold
+            # A cell engine reports a digit caught mid-change as unreadable.
+            valid = recognition.text != UNREADABLE and (
+                not value
+                or (
+                    (
+                        recognition.confidence is None
+                        or recognition.confidence >= region.confidence_threshold
+                    )
+                    and self._valid_field_type(value, region.field_type)
+                    and re.fullmatch(region.format_regex, value) is not None
                 )
-                and self._valid_field_type(value, region.field_type)
-                and re.fullmatch(region.format_regex, value) is not None
             )
             if smoother is not None and valid:
                 if value:
@@ -218,6 +242,18 @@ class RecognitionPipeline:
             latency_ms=elapsed_ms,
             fields=fields,
         )
+
+    def _observe_cells(self, region: RegionConfig, patch: Any) -> None:
+        import cv2
+
+        if not patch.size:
+            return
+        key = (region.rect, self.crop, tuple(self.perspective or ()))
+        activity = self.cell_activity.get(region.id)
+        if activity is None or activity.key != key:
+            activity = self.cell_activity[region.id] = CellActivity(key=key)
+        gray = patch if patch.ndim == 2 else cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+        activity.add(gray)
 
     def close(self) -> None:
         self.engine.close()

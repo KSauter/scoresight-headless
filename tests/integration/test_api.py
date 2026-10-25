@@ -332,3 +332,26 @@ def test_token_mode_still_rejects_unauthenticated_callers(tmp_path) -> None:
     with TestClient(app) as client:
         assert client.get("/api/v1/config").status_code == 401
         assert client.get("/api/v1/results").status_code == 401
+
+
+def test_cell_detection_needs_frames_and_proposes_cells(tmp_path) -> None:
+    import numpy as np
+
+    from scoresight.ocr.cells import CellActivity
+
+    app, token = make_client(tmp_path)
+    headers = {"Authorization": f"Bearer {token}"}
+    with TestClient(app) as client:
+        assert client.get("/api/v1/regions/score/cells?count=2").status_code == 401
+        missing = client.get("/api/v1/regions/score/cells?count=2", headers=headers)
+        assert missing.status_code == 409
+        gray = np.full((100, 160), 30, np.uint8)
+        gray[15:85, 100:150] = 255  # the units digit; the tens cell stays dark
+        activity = CellActivity()
+        activity.add(gray)
+        app.state.service.cell_activity["score"] = activity
+        found = client.get("/api/v1/regions/score/cells?count=2", headers=headers)
+    assert found.status_code == 200
+    cells = found.json()["cells"]
+    assert [cell["observed"] for cell in cells] == [False, True]
+    assert cells[0]["x2"] <= cells[1]["x1"] < cells[1]["x2"]

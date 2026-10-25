@@ -65,7 +65,7 @@ async def test_preview_continues_when_ocr_dependency_is_unavailable(
     capture = RepeatingCapture()
     monkeypatch.setattr(controller, "_build_source", lambda config: capture)
 
-    def unavailable_ocr(config: ServiceConfig):
+    def unavailable_ocr(config: ServiceConfig, **_: object):
         raise ModuleNotFoundError("No module named 'tesserocr'")
 
     monkeypatch.setattr(controller, "_build_pipeline", unavailable_ocr)

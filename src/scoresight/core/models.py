@@ -64,6 +64,19 @@ class PreprocessConfig(BaseModel):
     similarity_threshold: float = Field(default=0.02, ge=0.0, le=1.0)
 
 
+class CellSpan(BaseModel):
+    """One digit cell of a region, as a fraction of the region's width."""
+
+    x1: UnitFloat
+    x2: UnitFloat
+
+    @model_validator(mode="after")
+    def must_have_width(self) -> CellSpan:
+        if self.x2 <= self.x1:
+            raise ValueError("cell must end to the right of where it starts")
+        return self
+
+
 class RegionConfig(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(min_length=1, max_length=100)
@@ -76,6 +89,9 @@ class RegionConfig(BaseModel):
     smoothing_window: int = Field(default=1, ge=1, le=15)
     remove_leading_zeros: bool = False
     preprocess: PreprocessConfig = Field(default_factory=PreprocessConfig)
+    # Digit cells from left to right. With the "cnn" engine a region that has
+    # cells is read cell by cell; one without is read by Tesseract.
+    cells: list[CellSpan] = Field(default_factory=list, max_length=8)
 
     @field_validator("format_regex")
     @classmethod
@@ -106,7 +122,7 @@ class SourceConfig(BaseModel):
 
 
 class OcrConfig(BaseModel):
-    engine: Literal["tesseract"] = "tesseract"
+    engine: Literal["tesseract", "cnn"] = "tesseract"
     model: str = "scoreboard_general"
     language: str = "eng"
     target_hz: float = Field(default=10.0, ge=1.0, le=30.0)

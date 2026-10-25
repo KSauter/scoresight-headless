@@ -50,3 +50,4 @@
 .workspace > *,
 .controls > *,
 .results-table-wrap { min-width: 0; }
+.cell-controls{display:grid;grid-template-columns:1fr auto auto;align-items:end;gap:.5rem}.cell-controls label{margin-bottom:0}.cell-controls button{margin-bottom:0}

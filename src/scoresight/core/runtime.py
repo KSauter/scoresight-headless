@@ -18,6 +18,7 @@ from scoresight.core.models import HealthComponent, HealthSnapshot, ServiceConfi
 from scoresight.core.secrets import read_secret_file
 from scoresight.core.service import PreviewFrame, ScoreSightService
 from scoresight.ocr.base import OcrEngine
+from scoresight.ocr.cells import CellEngine, CellModel
 from scoresight.ocr.pipeline import RecognitionPipeline
 from scoresight.ocr.preprocess import transform_frame
 from scoresight.ocr.tesseract_engine import PooledTesseractEngine, TesseractEngine
@@ -69,7 +70,9 @@ class RuntimeController:
                 ocr_error = ""
                 if config.regions:
                     try:
-                        pipeline = self._build_pipeline(config)
+                        pipeline = self._build_pipeline(
+                            config, cell_activity=self.service.cell_activity
+                        )
                     except Exception as exc:
                         ocr_error = f"{type(exc).__name__}: {exc}"
                         logger.error(
@@ -201,7 +204,9 @@ class RuntimeController:
         return Path(__file__).resolve().parents[3] / "tesseract" / "tessdata"
 
     @staticmethod
-    def _build_pipeline(config: ServiceConfig) -> RecognitionPipeline:
+    def _build_pipeline(
+        config: ServiceConfig, cell_activity: dict[str, Any] | None = None
+    ) -> RecognitionPipeline:
         tessdata_path = RuntimeController.tessdata_path()
         field_whitelists = {
             "number": "0123456789",
@@ -213,24 +218,46 @@ class RuntimeController:
             if region.field_type in field_whitelists
         }
         engine: OcrEngine
-        if config.ocr.workers > 1:
-            engine = PooledTesseractEngine(
-                config.ocr.model,
-                workers=config.ocr.workers,
-                tessdata_path=tessdata_path,
-                character_whitelists=character_whitelists,
+        needs_tesseract = config.ocr.engine == "tesseract" or any(
+            not region.cells for region in config.regions if region.enabled
+        )
+        tesseract: OcrEngine | None = None
+        if needs_tesseract:
+            if config.ocr.workers > 1:
+                tesseract = PooledTesseractEngine(
+                    config.ocr.model,
+                    workers=config.ocr.workers,
+                    tessdata_path=tessdata_path,
+                    character_whitelists=character_whitelists,
+                )
+            else:
+                tesseract = TesseractEngine(
+                    config.ocr.model,
+                    tessdata_path=tessdata_path,
+                    character_whitelists=character_whitelists,
+                )
+        if config.ocr.engine == "cnn":
+            # Regions with digit cells are read by the cell network, the rest
+            # by Tesseract with the same model name.
+            engine = CellEngine(
+                CellModel.load(tessdata_path, config.ocr.model),
+                {
+                    region.id: [(cell.x1, cell.x2) for cell in region.cells]
+                    for region in config.regions
+                    if region.cells
+                },
+                {region.id: region.field_type for region in config.regions},
+                fallback=tesseract,
             )
         else:
-            engine = TesseractEngine(
-                config.ocr.model,
-                tessdata_path=tessdata_path,
-                character_whitelists=character_whitelists,
-            )
+            assert tesseract is not None
+            engine = tesseract
         return RecognitionPipeline(
             engine,
             config.regions,
             crop=config.crop,
             perspective=config.perspective,
+            cell_activity=cell_activity,
         )
 
     @staticmethod

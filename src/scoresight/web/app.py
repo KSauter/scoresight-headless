@@ -16,6 +16,7 @@ from fastapi import (
     FastAPI,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     WebSocket,
@@ -45,6 +46,7 @@ from scoresight.core.profiles import ProfileStore
 from scoresight.core.runtime import RuntimeController
 from scoresight.core.secrets import redact_mapping, restore_redacted
 from scoresight.core.service import ScoreSightService
+from scoresight.ocr.cells import detect_cells
 from scoresight.outputs.manager import OutputManager
 from scoresight.web.cloudflare import CloudflareAccessVerifier
 from scoresight.web.security import (
@@ -374,6 +376,41 @@ def create_app(
             media_type="image/png",
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.get("/api/v1/regions/{region_id}/cells")
+    async def detect_region_cells(
+        region_id: str,
+        count: int = Query(ge=1, le=8),
+        _: None = Depends(security.require_admin),
+    ) -> dict[str, Any]:
+        """Propose digit cells from what the saved region showed recently.
+
+        A dark cell cannot be seen in one frame, so the proposal is built from
+        the last minutes of frames; cells that never lit are placed with the
+        pitch of those that did and marked as not observed.
+        """
+        activity = service.cell_activity.get(region_id)
+        lit_map = activity.map() if activity is not None else None
+        if lit_map is None:
+            raise HTTPException(
+                status_code=409,
+                detail="nothing lit in this region yet: save it and wait until the "
+                "board shows a value there",
+            )
+        cells = detect_cells(lit_map, count)
+        if not cells:
+            raise HTTPException(status_code=409, detail="nothing lit in this region yet")
+        return {
+            "cells": [
+                {
+                    "x1": round(cell.x1, 4),
+                    "x2": round(cell.x2, 4),
+                    "observed": cell.observed,
+                }
+                for cell in cells
+            ],
+            "samples": activity.samples if activity is not None else 0,
+        }
 
     @app.get("/api/v1/config")
     async def get_config(_: None = Depends(security.require_admin)) -> dict[str, Any]:

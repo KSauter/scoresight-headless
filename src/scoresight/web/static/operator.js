@@ -9,6 +9,8 @@ let previewBitmap = null;
 let latestResultFields = [];
 let latestResultSequence = 0;
 let regionInteraction = null;
+// Cells the last detection placed without seeing them lit, per region id.
+const guessedCells = new Map();
 let lastFilteredPreviewAt = 0;
 const acceptedPreviews = new Map();
 const acceptedPreviewCaptures = new Set();
@@ -363,6 +365,7 @@ function bindConfig() {
   byId('target-hz').value = config.ocr.target_hz;
   byId('ocr-workers').value = config.ocr.workers;
   byId('ocr-model').value = config.ocr.model;
+  byId('ocr-engine').value = config.ocr.engine || 'tesseract';
   renderOutputs();
   pruneAcceptedPreviews();
   updateRegionEditor();
@@ -376,6 +379,7 @@ function collectConfig() {
   config.ocr.target_hz = Number(byId('target-hz').value);
   config.ocr.workers = Number(byId('ocr-workers').value);
   config.ocr.model = byId('ocr-model').value;
+  config.ocr.engine = byId('ocr-engine').value;
   // The form is authoritative; the raw JSON mirrors it and is applied explicitly.
   delete config.security;
   return config;
@@ -560,7 +564,41 @@ function updateRegionEditor() {
   byId('region-invert').checked = region.preprocess.invert;
   byId('region-autocrop').checked = region.preprocess.autocrop;
   byId('region-leading').checked = region.remove_leading_zeros;
+  region.cells = region.cells || [];
+  byId('region-cell-count').value = region.cells.length || defaultCellCount(region);
+  renderCellState(region);
   updateRegionRuntime(true);
+}
+
+function defaultCellCount(region) {
+  return {time: 4, number: 2, text: 1}[region.field_type] || 1;
+}
+
+function renderCellState(region) {
+  const guessed = guessedCells.get(region.id) || [];
+  const node = byId('region-cells-state');
+  if (!region.cells.length) {
+    node.textContent = 'No cells: Tesseract reads this region. Save the region, let the board run for a minute, then detect.';
+    return;
+  }
+  const unseen = guessed.filter(Boolean).length;
+  node.textContent = `${region.cells.length} cells. Drag a cell edge to adjust.`
+    + (unseen ? ` ${unseen} placed by spacing because they have not lit yet (dashed); check them.` : '');
+}
+
+function cellEdgeAt(point, region) {
+  if (!region?.cells?.length) return null;
+  const {x, y, width, height} = region.rect;
+  if (point.y < y || point.y > y + height) return null;
+  const threshold = 7 / canvas.getBoundingClientRect().width;
+  let best = null;
+  region.cells.forEach((cell, index) => {
+    for (const side of ['x1', 'x2']) {
+      const distance = Math.abs(point.x - (x + cell[side] * width));
+      if (distance <= threshold && (!best || distance < best.distance)) best = {index, side, distance};
+    }
+  });
+  return best;
 }
 
 function collectRegion() {
@@ -581,6 +619,29 @@ function collectRegion() {
   region.preprocess.autocrop = byId('region-autocrop').checked;
   region.remove_leading_zeros = byId('region-leading').checked;
 }
+
+byId('detect-cells').addEventListener('click', async () => {
+  const region = selectedRegion();
+  if (!region) return;
+  const count = Math.max(1, Math.min(8, Number(byId('region-cell-count').value) || defaultCellCount(region)));
+  try {
+    const result = await api(`/api/v1/regions/${encodeURIComponent(region.id)}/cells?count=${count}`);
+    region.cells = result.cells.map(({x1, x2}) => ({x1, x2}));
+    guessedCells.set(region.id, result.cells.map((cell) => !cell.observed));
+    toast(`Cells detected from ${result.samples} frames. Check them, then save.`);
+  } catch (error) {
+    toast(error.message, true);
+  }
+  updateRegionEditor(); render();
+});
+
+byId('clear-cells').addEventListener('click', () => {
+  const region = selectedRegion();
+  if (!region) return;
+  region.cells = [];
+  guessedCells.delete(region.id);
+  updateRegionEditor(); render();
+});
 
 function render() {
   context.clearRect(0, 0, canvas.width, canvas.height);
@@ -615,6 +676,22 @@ function render() {
     context.strokeStyle = isSelected ? '#55d9d0' : '#f4c56a';
     context.lineWidth = isSelected ? 3 : 2;
     context.strokeRect(x * canvas.width, y * canvas.height, width * canvas.width, height * canvas.height);
+    if (region.cells?.length) {
+      const guessed = guessedCells.get(region.id) || [];
+      context.save();
+      context.strokeStyle = isSelected ? '#ff9f43' : '#ff9f4399';
+      context.lineWidth = isSelected ? 2 : 1;
+      region.cells.forEach((cell, index) => {
+        context.setLineDash(guessed[index] ? [5, 4] : []);
+        context.strokeRect(
+          (x + cell.x1 * width) * canvas.width,
+          y * canvas.height + 3,
+          (cell.x2 - cell.x1) * width * canvas.width,
+          height * canvas.height - 6,
+        );
+      });
+      context.restore();
+    }
     const label = result?.value ? `${region.name} · ${result.value}` : region.name;
     context.font = '14px system-ui';
     const labelWidth = Math.max(80, context.measureText(label).width + 12);
@@ -680,6 +757,20 @@ function updateRegionInteraction(point) {
   if (!regionInteraction) return;
   const region = config.regions.find((candidate) => candidate.id === regionInteraction.id);
   if (!region) return;
+  if (regionInteraction.type === 'cell') {
+    const cells = region.cells;
+    const cell = cells[regionInteraction.index];
+    const fraction = Math.max(0, Math.min(1, (point.x - region.rect.x) / region.rect.width));
+    const gap = 0.02;
+    if (regionInteraction.side === 'x1') {
+      const lower = regionInteraction.index ? cells[regionInteraction.index - 1].x2 : 0;
+      cell.x1 = Math.max(lower, Math.min(cell.x2 - gap, fraction));
+    } else {
+      const upper = regionInteraction.index < cells.length - 1 ? cells[regionInteraction.index + 1].x1 : 1;
+      cell.x2 = Math.min(upper, Math.max(cell.x1 + gap, fraction));
+    }
+    return;
+  }
   const original = regionInteraction.original;
   const minimum = 0.005;
   if (regionInteraction.type === 'move') {
@@ -731,6 +822,13 @@ canvas.addEventListener('pointerdown', (event) => {
   }
   const selected = selectedRegion();
   const handle = resizeHandleAt(point, selected);
+  const cellEdge = handle ? null : cellEdgeAt(point, selected);
+  if (cellEdge) {
+    regionInteraction = {id: selected.id, type: 'cell', index: cellEdge.index, side: cellEdge.side};
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    return;
+  }
   const region = handle ? selected : regionUnderPoint(point);
   selectedId = region?.id || null;
   if (region) {
@@ -759,7 +857,8 @@ canvas.addEventListener('pointermove', (event) => {
     return;
   }
   const handle = resizeHandleAt(point, selectedRegion());
-  if (handle === 'nw' || handle === 'se') canvas.style.cursor = 'nwse-resize';
+  if (!handle && cellEdgeAt(point, selectedRegion())) canvas.style.cursor = 'ew-resize';
+  else if (handle === 'nw' || handle === 'se') canvas.style.cursor = 'nwse-resize';
   else if (handle === 'ne' || handle === 'sw') canvas.style.cursor = 'nesw-resize';
   else canvas.style.cursor = regionUnderPoint(point) ? 'move' : 'crosshair';
 });

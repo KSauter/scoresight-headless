@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from scoresight.core.config import ConfigStore
 from scoresight.core.events import LatestValueBus
@@ -27,6 +28,9 @@ class ScoreSightService:
         self.latest_result: ResultBatch | None = None
         self.latest_preview: PreviewFrame | None = None
         self.latest_region_previews: dict[str, bytes] = {}
+        # Which pixels of each region lit up recently, kept across pipeline
+        # rebuilds and read when the operator asks for the digit cells.
+        self.cell_activity: dict[str, Any] = {}
         self.health = HealthSnapshot()
         self.metrics = ServiceMetrics()
         self.started_at = datetime.now(UTC)
