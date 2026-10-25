@@ -33,6 +33,12 @@ class ClockTracker:
         self.pending_since = 0.0
         self.misses = 0
         self.repeats = 0
+        # -1 while the clock counts down, +1 while it counts up, learned from
+        # accepted steps. A running clock never moves against its direction:
+        # on this kind of board a digit caught mid-change shows the segments
+        # of both digits, and 5 over 4 or 4 over 3 is exactly a 9 - so 36.4
+        # appears as 36.9 for a frame, close enough to pass as a small step.
+        self.direction = 0
 
     @property
     def tenths(self) -> bool:
@@ -47,17 +53,17 @@ class ClockTracker:
             return int(minutes) * 60 + int(seconds), timestamp, 1.0
         return float(value), timestamp, 0.1
 
-    @staticmethod
     def _consistent(
-        previous: tuple[float, float, float], current: tuple[float, float, float]
+        self, previous: tuple[float, float, float], current: tuple[float, float, float]
     ) -> bool:
         value, timestamp, resolution = current
         old_value, old_timestamp, old_resolution = previous
         elapsed = max(0.0, timestamp - old_timestamp)
+        step = value - old_value
+        if step * self.direction < -0.02:
+            return False
         # Quantized displays can cross a second boundary between adjacent frames.
-        return (
-            abs(value - old_value) <= elapsed + max(resolution, old_resolution) + 0.02
-        )
+        return abs(step) <= elapsed + max(resolution, old_resolution) + 0.02
 
     def reset_pending(self) -> None:
         self.pending = None
@@ -68,6 +74,7 @@ class ClockTracker:
     def clear(self) -> None:
         self.accepted = None
         self.repeats = 0
+        self.direction = 0
         self.reset_pending()
 
     def reject(self) -> None:
@@ -111,6 +118,9 @@ class ClockTracker:
         if self.pending is None:
             self._start(current)
         elif self._consistent(self.pending, current):
+            step = current[0] - self.pending[0]
+            if self.direction == 0 and abs(step) > 0.05:
+                self.direction = -1 if step < 0 else 1
             self.pending = current
             self.pending_count += 1
             self.misses = 0
@@ -138,6 +148,11 @@ class ClockTracker:
             )
         if not confirmed:
             return False
+        if not plausible:
+            # A reset (a new period, a corrected clock) may change direction.
+            self.direction = 0
+        elif self.accepted is not None and abs(current[0] - self.accepted[0]) > 0.05:
+            self.direction = -1 if current[0] < self.accepted[0] else 1
         self.accepted = current
         self.reset_pending()
         return True

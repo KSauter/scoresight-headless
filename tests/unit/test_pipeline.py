@@ -771,3 +771,31 @@ def test_bad_reads_do_not_contaminate_smoothing_history():
     results = [pipeline.process(frame(i)).fields[0] for i in range(4)]
     assert [result.value for result in results] == ["12"] * 4
     assert results[-1].candidate_value == "12"
+
+
+def test_countdown_rejects_a_digit_caught_mid_change() -> None:
+    """Segments of two digits glow together for a frame while the board
+    changes: 5 over 4 and 4 over 3 both look like a 9, so a clock at 36.4
+    reads 36.9. A countdown never moves up, so that frame is not believed.
+    """
+    tracker = ClockTracker(2)
+    readings = [("36.8", 0.0), ("36.7", 0.1), ("36.6", 0.2), ("36.9", 0.3), ("36.9", 0.4)]
+    accepted = []
+    for value, timestamp in readings:
+        if tracker.add(value, timestamp, unchanged=False):
+            accepted.append(value)
+    assert "36.9" not in accepted
+    assert tracker.direction == -1
+    assert tracker.add("36.2", 0.5, unchanged=False) is False
+    assert tracker.add("36.1", 0.6, unchanged=False) is True
+
+
+def test_clock_counting_up_still_confirms() -> None:
+    tracker = ClockTracker(2)
+    confirmed = [
+        tracker.add(value, timestamp, unchanged=False)
+        for value, timestamp in [("0:10", 0.0), ("0:11", 1.0), ("0:12", 2.0), ("0:13", 3.0)]
+    ]
+    assert confirmed[-1] is True
+    assert tracker.direction == 1
+    assert tracker.accepted is not None and tracker.accepted[0] == 13
