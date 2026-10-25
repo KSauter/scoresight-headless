@@ -171,3 +171,37 @@ a model copes with a camera a few pixels off.
 On the held-out stretches of both recordings `nautronic2` reads 99.8 % of the
 crops exactly (99.5 % with shifted regions), against 82.1 % (79.3 %) for
 `nautronic` and 61.5 % (55.0 %) for `scoreboard_general`.
+
+## Digit cell network
+
+The service's `cnn` engine reads digit cells with a small convolutional network instead
+of Tesseract. It is trained from the same labels, cut into cells:
+
+```bash
+T=output/training-nautronic
+# PyTorch is not a service dependency; use a separate environment
+uv venv $T/nn/.venv && uv pip install --python $T/nn/.venv/bin/python \
+    torch onnx opencv-python-headless pydantic
+PYTHONPATH=src:scripts/training $T/nn/.venv/bin/python scripts/training/build_cells.py \
+    $T/corpus2/config-extract.json --out $T/cells-nn \
+    --clock 2=time:4:$T/corpus2/clusters/time_all.jsonl:$T/corpus2/clusters/time:$T/corpus2/labels_time.jsonl \
+            1=time:4:$T/corpus/recheck/reading.jsonl:$T/corpus/recheck/time:$T/corpus/labels_time_rechecked.jsonl \
+            2=hPenTime1:3:$T/corpus2/clusters/hPenTime1.jsonl:$T/corpus2/clusters/hPenTime1:$T/corpus2/labels_hPenTime1.jsonl \
+            2=awayPenTime1:3:$T/corpus2/clusters/awayPenTime1.jsonl:$T/corpus2/clusters/awayPenTime1:$T/corpus2/labels_awayPenTime1.jsonl \
+    --cells 2=$T/corpus2/labels_cells.jsonl 1=$T/corpus/labels_cells.jsonl
+PYTHONPATH=src:scripts/training $T/nn/.venv/bin/python scripts/training/train_cells.py \
+    $T/cells-nn --model nautronic --out tesseract/tessdata \
+    --holdout 2:300-400,600-700,2400-2600,3880-3910,5450-5650,7034-7080 \
+              1:300-400,600-700,1300-1350,1458-1466,1550-1560
+```
+
+Clock cells come from the hand-named pixel groups of `cluster_cells.py`; groups named
+`?` become the class `mix`, a digit caught while changing. Score, period and penalty
+number cells are found with the service's own cell detection and labelled from
+`label_cells.py`. Training takes about three minutes on a laptop GPU.
+
+On the held-out stretches of both recordings 99.8 % of the cells are read correctly
+(99.76 % with cells shifted by up to 3 px). The remaining mistakes are almost all digits
+reported as `mix`. Three cells read a 4 as a 9 with high confidence - a 5 changing to a 4,
+whose fading top bar makes the 4 a 9 for a frame; the clock tracker rejects such a step
+against the counting direction.
