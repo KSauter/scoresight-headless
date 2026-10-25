@@ -399,7 +399,9 @@ def create_app(
             )
         cells = detect_cells(lit_map, count)
         if not cells:
-            raise HTTPException(status_code=409, detail="nothing lit in this region yet")
+            raise HTTPException(
+                status_code=409, detail="nothing lit in this region yet"
+            )
         return {
             "cells": [
                 {

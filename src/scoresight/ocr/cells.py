@@ -101,7 +101,9 @@ class CellModel:
             )
         meta = json.loads(sidecar.read_text(encoding="utf-8"))
         if meta.get("input") != [INPUT_WIDTH, INPUT_HEIGHT]:
-            raise ValueError(f"{sidecar.name}: unexpected input size {meta.get('input')}")
+            raise ValueError(
+                f"{sidecar.name}: unexpected input size {meta.get('input')}"
+            )
         return cls(classes=tuple(meta["classes"]), path=path)
 
 
@@ -170,7 +172,8 @@ class CellEngine:
             ):
                 results[index] = answer
         return [
-            result if result is not None else Recognition(UNREADABLE, 0.0) for result in results
+            result if result is not None else Recognition(UNREADABLE, 0.0)
+            for result in results
         ]
 
     def _classify(self, requests: list[tuple[int, Any, str]]) -> list[Recognition]:
@@ -197,7 +200,9 @@ class CellEngine:
         answers = []
         for (_, _, region_id), (start, end) in zip(requests, spans, strict=True):
             chars = [self.model.classes[int(k)] for k in best[start:end]]
-            confidence = float(probabilities[np.arange(start, end), best[start:end]].min())
+            confidence = float(
+                probabilities[np.arange(start, end), best[start:end]].min()
+            )
             text = assemble_text(chars, self.field_types.get(region_id, "text"))
             answers.append(Recognition(text, 0.0 if text == UNREADABLE else confidence))
         return answers
@@ -266,7 +271,9 @@ class DetectedCell:
     observed: bool
 
 
-def detect_cells(lit_map: Any, count: int, *, threshold: float = 0.03) -> list[DetectedCell]:
+def detect_cells(
+    lit_map: Any, count: int, *, threshold: float = 0.03
+) -> list[DetectedCell]:
     """Cells of a region from how often each pixel was lit.
 
     Digits are right-aligned and share one width and pitch, as on any
@@ -339,6 +346,8 @@ def detect_cells(lit_map: Any, count: int, *, threshold: float = 0.03) -> list[D
         left = found[0].x1 - pitch
         found.insert(0, DetectedCell(left, left + cell_width, False))
     return [
-        DetectedCell(max(0.0, cell.x1) / width, min(float(width), cell.x2) / width, cell.observed)
+        DetectedCell(
+            max(0.0, cell.x1) / width, min(float(width), cell.x2) / width, cell.observed
+        )
         for cell in found
     ]
